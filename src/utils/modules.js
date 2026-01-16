@@ -100,7 +100,7 @@ DiscordConstants.ChannelTypes = WebpackModules.getModule((x) => x.GUILD_VOICE, {
 	searchExports: true,
 });
 
-DiscordConstants.NOOP = () => {};
+DiscordConstants.NOOP = () => { };
 
 if (
 	!DiscordConstants.Permissions ||
@@ -124,7 +124,10 @@ const ChannelItemUtils = WebpackModules.getMangled(".ToS;", {
 	icon: WebpackModules.Filters.byStrings(",textFocused:"),
 });
 
-const RolePill = WebpackModules.getBySource(".roleRemoveButton,")?.Z;
+const RolePillModule = WebpackModules.getBySource(".roleRemoveButtonCanRemove,");
+const RolePill = RolePillModule
+	? Object.values(RolePillModule).find((x) => x?.render)
+	: null;
 
 const ChannelPermissionStore = WebpackModules.getByKeys(
 	"getChannelPermissions",
