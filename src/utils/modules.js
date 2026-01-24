@@ -30,10 +30,6 @@ const Logger = {
 	},
 };
 
-/**
- * @type {null | string}
- */
-const key = null;
 let loaded_successfully_internal = true;
 
 const {
@@ -57,7 +53,6 @@ const WebpackModules = BdApi.Webpack;
 const DiscordPermissions = WebpackModules.getModule((m) => m.ADD_REACTIONS, {
 	searchExports: true,
 });
-const Dispatcher = WebpackModules.getByKeys("dispatch", "subscribe");
 const ImageResolver = WebpackModules.getByKeys(
 	"getUserAvatarURL",
 	"getGuildIconURL",
@@ -100,7 +95,7 @@ DiscordConstants.ChannelTypes = WebpackModules.getModule((x) => x.GUILD_VOICE, {
 	searchExports: true,
 });
 
-DiscordConstants.NOOP = () => { };
+DiscordConstants.NOOP = () => {};
 
 if (
 	!DiscordConstants.Permissions ||
@@ -115,16 +110,15 @@ const chat = WebpackModules.getByKeys("chat", "chatContent")?.chat;
 
 const Route = WebpackModules.getBySource(/.ImpressionTypes.PAGE,name:\w+,/);
 
-const ChannelItem = WebpackModules.getBySource(".iconContainerWithGuildIcon,");
-const ChannelItemRenderer = Object.values(ChannelItem).find((k) => {
-	return k?.render?.toString()?.includes(".ALL_MESSAGES");
-});
+const ChannelItemRenderer = WebpackModules.getModule((m) =>
+	m.render?.toString().includes(".ALL_MESSAGES"),
+);
 
-const ChannelItemUtils = WebpackModules.getMangled(".ToS;", {
+const ChannelItemUtils = WebpackModules.getMangled(",textFocused:", {
 	icon: WebpackModules.Filters.byStrings(",textFocused:"),
 });
 
-const RolePillModule = WebpackModules.getBySource(".roleRemoveButtonCanRemove,");
+const RolePillModule = WebpackModules.getBySource("overflow-more-roles-");
 const RolePill = RolePillModule
 	? Object.values(RolePillModule).find((x) => x?.render)
 	: null;
@@ -137,16 +131,19 @@ if (!ChannelPermissionStore?.can) {
 	Logger.err("Failed to load ChannelPermissionStore", ChannelPermissionStore);
 }
 
-const fluxDispatcherHandlers = WebpackModules.getByKeys("dispatch", "subscribe")
-	._actionHandlers._dependencyGraph;
+const fluxDispatcherHandlers = WebpackModules.getByKeys(
+	"dispatch",
+	"subscribe",
+	{ searchExports: true },
+)?._actionHandlers._dependencyGraph;
 
 const PermissionStoreActionHandler =
-	fluxDispatcherHandlers.nodes[
+	fluxDispatcherHandlers?.nodes[
 		WebpackModules.getStore("PermissionStore")._dispatchToken
 	].actionHandler;
 
 const ChannelListStoreActionHandler =
-	fluxDispatcherHandlers.nodes[
+	fluxDispatcherHandlers?.nodes[
 		WebpackModules.getStore("ChannelListStore")._dispatchToken
 	].actionHandler;
 
@@ -172,7 +169,7 @@ const Voice = WebpackModules.getByKeys("getVoiceStateStats");
 
 const UserMentions = WebpackModules.getByKeys("handleUserContextMenu");
 
-const ChannelUtils = WebpackModules.getMangled(".guildBreadcrumbIcon,", {
+const ChannelUtils = WebpackModules.getMangled(".SMALLER,className", {
 	renderTopic: WebpackModules.Filters.byStrings(".GROUP_DM:return null"),
 });
 if (!ChannelUtils?.renderTopic) {
@@ -222,7 +219,6 @@ const UsedModules = {
 	NavigationUtils,
 	ImageResolver,
 	UserStore,
-	Dispatcher,
 
 	ContextMenu,
 	Components: {
@@ -277,9 +273,9 @@ function checkVariables() {
 
 	if (
 		Object.values(UsedModules).includes(undefined) ||
-		// @ts-ignore
 		Object.values(UsedModules.Components).includes(undefined)
 	) {
+		Logger.err("Some modules are undefined.");
 		return false;
 	}
 
