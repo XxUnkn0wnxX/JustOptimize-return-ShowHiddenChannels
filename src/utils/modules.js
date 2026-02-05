@@ -45,7 +45,7 @@ const {
 
 // TODO: Add this to above when BdApi types are updated
 /**
- * @type {typeof BdApi.Webpack & { getBySource: (source: string | RegExp, ...filters: string[]) => any, getMangled: (module: string, filters: Record<string,  (...args: any[]) => boolean>) => any }}
+ * @type {typeof BdApi.Webpack & { getBySource: (source: string | RegExp, ...filters: string[]) => any, getMangled: (module: string | RegExp, filters: Record<string,  (...args: any[]) => boolean>) => any }}
  */
 // @ts-ignore
 const WebpackModules = BdApi.Webpack;
@@ -114,9 +114,12 @@ const ChannelItemRenderer = WebpackModules.getModule((m) =>
 	m.render?.toString().includes(".ALL_MESSAGES"),
 );
 
-const ChannelItemUtils = WebpackModules.getMangled(",textFocused:", {
-	icon: WebpackModules.Filters.byStrings(",textFocused:"),
-});
+const ChannelItemUtils = WebpackModules.getMangled(
+	/hasActiveThreads:[a-zA-Z]+=!1,/,
+	{
+		icon: WebpackModules.Filters.byRegex(/hasActiveThreads:[a-zA-Z]+=!1,/),
+	},
+);
 
 const RolePillModule = WebpackModules.getBySource("overflow-more-roles-");
 const RolePill = RolePillModule

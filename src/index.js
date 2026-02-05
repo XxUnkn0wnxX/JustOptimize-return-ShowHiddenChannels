@@ -326,9 +326,9 @@ export default (() => {
 
 					return args[0]?.isHidden()
 						? {
-							mentionCount: 0,
-							unread: false,
-						}
+								mentionCount: 0,
+								unread: false,
+							}
 						: res;
 				},
 			);
@@ -374,7 +374,7 @@ export default (() => {
 						return (
 							!this.settings.blacklistedGuilds[channel.guild_id] &&
 							this.settings.channels[
-							DiscordConstants.ChannelTypes[channel.type]
+								DiscordConstants.ChannelTypes[channel.type]
 							]
 						);
 					}
@@ -484,7 +484,7 @@ export default (() => {
 
 					const isInCallInThisChannel =
 						instance.channel.type ===
-						DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
+							DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
 					if (!isInCallInThisChannel) {
 						return res;
 					}
@@ -503,8 +503,8 @@ export default (() => {
 						return res;
 					}
 
-					wrapper.props.onMouseDown = () => { };
-					wrapper.props.onMouseUp = () => { };
+					wrapper.props.onMouseDown = () => {};
+					wrapper.props.onMouseUp = () => {};
 
 					const mainContent = wrapper?.props?.children[1]?.props?.children;
 
@@ -533,15 +533,15 @@ export default (() => {
 						type: "warning",
 					},
 				);
+			} else {
+				Patcher.before(ChannelItemUtils, "icon", (_, args) => {
+					if (!args[2]) return;
+
+					if (args[0]?.isHidden?.() && args[2].locked) {
+						args[2].locked = false;
+					}
+				});
 			}
-
-			Patcher.before(ChannelItemUtils, "icon", (_, args) => {
-				if (!args[2]) return;
-
-				if (args[0]?.isHidden?.() && args[2].locked) {
-					args[2].locked = false;
-				}
-			});
 
 			//* Manually collapse hidden channel category
 			if (!ChannelStore?.getChannel || !GuildChannelStore?.getChannels) {
@@ -598,7 +598,7 @@ export default (() => {
 
 					const GuildCategories =
 						GuildChannelStore.getChannels(guildId)[
-						DiscordConstants.ChannelTypes.GUILD_CATEGORY
+							DiscordConstants.ChannelTypes.GUILD_CATEGORY
 						];
 					Object.defineProperty(HiddenCategoryChannel, "position", {
 						value:
@@ -709,15 +709,15 @@ export default (() => {
 
 						HiddenCategory.shownChannelIds =
 							res.guildChannels.collapsedCategoryIds[hiddenCategoryId] ||
-								HiddenCategory.isCollapsed
+							HiddenCategory.isCollapsed
 								? []
 								: HiddenChannels.channels
-									.sort((x, y) => {
-										const xPos = x.position + (x.isGuildVocal() ? 1e4 : 1e5);
-										const yPos = y.position + (y.isGuildVocal() ? 1e4 : 1e5);
-										return xPos - yPos;
-									})
-									.map((m) => m.id);
+										.sort((x, y) => {
+											const xPos = x.position + (x.isGuildVocal() ? 1e4 : 1e5);
+											const yPos = y.position + (y.isGuildVocal() ? 1e4 : 1e5);
+											return xPos - yPos;
+										})
+										.map((m) => m.id);
 						break;
 					}
 				}
@@ -900,7 +900,7 @@ export default (() => {
 				},
 			);
 
-			toForceUpdate.forceUpdate(() => toForceUpdate.forceUpdate(() => { }));
+			toForceUpdate.forceUpdate(() => toForceUpdate.forceUpdate(() => {}));
 		}
 
 		stop() {
