@@ -31,6 +31,12 @@ export function IconSwitchWrapper({ icon, value, onChange, children, note }) {
 						onChange(!enabled);
 						setEnabled(!enabled);
 					}}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							onChange(!enabled);
+							setEnabled(!enabled);
+						}
+					}}
 				/>
 				<div
 					style={{

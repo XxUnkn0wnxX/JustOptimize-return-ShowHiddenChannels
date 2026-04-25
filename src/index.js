@@ -1,3 +1,5 @@
+// @ts-check
+/** @typedef {import('./discord').SHCChannel} SHCChannel */
 import styles from "./styles.css";
 
 const config = {
@@ -120,7 +122,7 @@ export default (() => {
 			const releases_raw = await fetch(
 				`https://api.github.com/repos/${config.github_short}/releases`,
 			);
-			if (!releases_raw || !releases_raw.ok) {
+			if (!releases_raw?.ok) {
 				return this.api.UI.showToast(
 					"(ShowHiddenChannels) Failed to check for updates.",
 					{
@@ -130,7 +132,7 @@ export default (() => {
 			}
 
 			let releases = await releases_raw.json();
-			if (!releases || !releases.length) {
+			if (!releases?.length) {
 				return this.api.UI.showToast(
 					"(ShowHiddenChannels) Failed to check for updates.",
 					{
@@ -231,7 +233,7 @@ export default (() => {
 						type: "success",
 					},
 				);
-			} catch (err) {
+			} catch (_err) {
 				return failed();
 			}
 		}
@@ -302,12 +304,17 @@ export default (() => {
 				);
 			}
 
-			Patcher.instead(ChannelRecordBase.prototype, "isHidden", (channel) => {
-				return (
-					![1, 3].includes(channel.type) &&
-					!this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel)
-				);
-			});
+			Patcher.instead(
+				ChannelRecordBase.prototype,
+				"isHidden",
+				(unknownChannel) => {
+					const channel = /** @type {SHCChannel} */ (unknownChannel);
+					return (
+						![1, 3].includes(channel.type) &&
+						!this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel)
+					);
+				},
+			);
 
 			if (!ReadStateStore) {
 				this.api.UI.showToast(
@@ -324,7 +331,8 @@ export default (() => {
 				(_, args, res) => {
 					if (this.settings.MarkUnread) return res;
 
-					return args[0]?.isHidden()
+					const [channel] = /** @type {[SHCChannel]} */ (args);
+					return channel?.isHidden()
 						? {
 								mentionCount: 0,
 								unread: false,
@@ -364,28 +372,25 @@ export default (() => {
 			});
 
 			//* Make hidden channel visible
-			Patcher.after(
-				ChannelPermissionStore,
-				"can",
-				(_, [permission, channel], res) => {
-					if (!channel?.isHidden?.()) return res;
+			Patcher.after(ChannelPermissionStore, "can", (_, args, res) => {
+				const [permission, channel] = /** @type {[bigint, SHCChannel]} */ (
+					args
+				);
+				if (!channel?.isHidden?.()) return res;
 
-					if (permission === DiscordConstants.Permissions.VIEW_CHANNEL) {
-						return (
-							!this.settings.blacklistedGuilds[channel.guild_id] &&
-							this.settings.channels[
-								DiscordConstants.ChannelTypes[channel.type]
-							]
-						);
-					}
+				if (permission === DiscordConstants.Permissions.VIEW_CHANNEL) {
+					return (
+						!this.settings.blacklistedGuilds[channel.guild_id] &&
+						this.settings.channels[DiscordConstants.ChannelTypes[channel.type]]
+					);
+				}
 
-					if (permission === DiscordConstants.Permissions.CONNECT) {
-						return false;
-					}
+				if (permission === DiscordConstants.Permissions.CONNECT) {
+					return false;
+				}
 
-					return res;
-				},
-			);
+				return res;
+			});
 
 			if (!Voice || !Route) {
 				this.api.UI.showToast(
@@ -432,7 +437,8 @@ export default (() => {
 			Patcher.instead(
 				MessageActions,
 				"fetchMessages",
-				(instance, [fetchConfig], res) => {
+				(instance, args, res) => {
+					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
 					if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
 						return;
 					}
@@ -451,7 +457,9 @@ export default (() => {
 					);
 				}
 
-				Patcher.after(ChannelItemRenderer, "render", (_, [instance], res) => {
+				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
+					const [instance] =
+						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
 					if (!instance?.channel?.isHidden()) {
 						return res;
 					}
@@ -468,6 +476,7 @@ export default (() => {
 							m.type === "div",
 						{
 							walkable: ["props", "children", "child", "sibling"],
+							// @ts-expect-error - maxRecursion is valid but missing from BdApi types
 							maxRecursion: 100,
 						},
 					);
@@ -495,6 +504,7 @@ export default (() => {
 							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
 						{
 							walkable: ["props", "children", "child", "sibling"],
+							// @ts-expect-error - maxRecursion is valid but missing from BdApi types
 							maxRecursion: 100,
 						},
 					);
@@ -535,10 +545,12 @@ export default (() => {
 				);
 			} else {
 				Patcher.before(ChannelItemUtils, "icon", (_, args) => {
-					if (!args[2]) return;
+					const [channel, , opts] =
+						/** @type {[SHCChannel, any, {locked: boolean}]} */ (args);
+					if (!opts) return;
 
-					if (args[0]?.isHidden?.() && args[2].locked) {
-						args[2].locked = false;
+					if (channel?.isHidden?.() && opts.locked) {
+						opts.locked = false;
 					}
 				});
 			}
@@ -553,7 +565,8 @@ export default (() => {
 				);
 			}
 
-			Patcher.after(ChannelStore, "getChannel", (_, [channelId], res) => {
+			Patcher.after(ChannelStore, "getChannel", (_, args, res) => {
+				const [channelId] = /** @type {[string]} */ (args);
 				const guild_id = channelId?.replace("_hidden", "");
 				const isHiddenCategory = channelId?.endsWith("_hidden");
 
@@ -578,7 +591,8 @@ export default (() => {
 			Patcher.after(
 				ChannelStore,
 				"getMutableGuildChannelsForGuild",
-				(_, [guildId], GuildChannels) => {
+				(_, args, GuildChannels) => {
+					const [guildId] = /** @type {[string]} */ (args);
 					if (!GuildChannelStore?.getChannels) return;
 
 					if (
@@ -652,7 +666,8 @@ export default (() => {
 			});
 
 			//* Custom category or sorting order
-			Patcher.after(ChannelListStore, "getGuild", (_, [guildId], res) => {
+			Patcher.after(ChannelListStore, "getGuild", (_, args, res) => {
+				const [guildId] = /** @type {[string]} */ (args);
 				if (this.settings.blacklistedGuilds[guildId]) {
 					return;
 				}
@@ -808,25 +823,20 @@ export default (() => {
 
 			for (const category of categories) {
 				const channelRecords = Object.entries(category.channels);
-				const filteredChannelRecords = channelRecords
-					.map(([channelID, channelRecord]) => {
-						if (hiddenChannels.channels.some((m) => m.id === channelID)) {
-							if (
-								!this.hiddenChannelCache[guildId].some(
-									(m) => m[0] === channelID,
-								)
-							) {
-								this.hiddenChannelCache[guildId].push([
-									channelID,
-									channelRecord,
-								]);
-							}
-							return false;
+				const filteredChannelRecords = channelRecords.filter(
+					([channelID, channelRecord]) => {
+						const isHidden = hiddenChannels.channels.some(
+							(m) => m.id === channelID,
+						);
+						if (
+							isHidden &&
+							!this.hiddenChannelCache[guildId].some((m) => m[0] === channelID)
+						) {
+							this.hiddenChannelCache[guildId].push([channelID, channelRecord]);
 						}
-						return [channelID, channelRecord];
-					})
-					.filter(Boolean);
-
+						return !isHidden;
+					},
+				);
 				category.channels = Object.fromEntries(filteredChannelRecords);
 				if (category.hiddenChannelIds) {
 					category.hiddenChannelIds = category.hiddenChannelIds.filter((v) =>

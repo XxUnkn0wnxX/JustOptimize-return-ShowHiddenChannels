@@ -21,8 +21,10 @@ Example structure:
 
 ```json
 "changelog": [
-  { "title": "v1.2.0 - New stuff",  "items": ["Added X."] },
-  { "title": "v1.1.0 - Fixes",      "items": ["Fixed Y."] },
-  { "title": "v1.0.0 - Release",    "items": ["Initial release."] }
+  { "title": "v1.2.0 - New stuff", "type": "added",   "items": ["Added X."] },
+  { "title": "v1.1.0 - Fixes",     "type": "fixed",   "items": ["Fixed Y."] },
+  { "title": "v1.0.0 - Release",   "type": "added",   "items": ["Initial release."] }
 ]
 ```
+
+Valid values for `type`: `"fixed"`, `"added"`, `"progress"`, `"changed"`.

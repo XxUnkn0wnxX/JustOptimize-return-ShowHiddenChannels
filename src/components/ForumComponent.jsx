@@ -3,7 +3,6 @@ import { ModuleStore } from "../utils/modules";
 
 const {
 	Components: { TextElement },
-	React,
 } = ModuleStore;
 
 export default function ForumComponent({ channel }) {

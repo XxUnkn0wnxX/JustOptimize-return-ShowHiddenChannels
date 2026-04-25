@@ -6,7 +6,6 @@ const {
 	Components: { TextElement },
 	RolePill,
 	DiscordConstants,
-	React,
 } = ModuleStore;
 
 export default function ChannelRolesComponent({

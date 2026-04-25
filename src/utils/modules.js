@@ -47,7 +47,7 @@ const {
 /**
  * @type {typeof BdApi.Webpack & { getBySource: (source: string | RegExp, ...filters: string[]) => any, getMangled: (module: string | RegExp, filters: Record<string,  (...args: any[]) => boolean>) => any }}
  */
-// @ts-ignore
+// @ts-expect-error
 const WebpackModules = BdApi.Webpack;
 
 const DiscordPermissions = WebpackModules.getModule((m) => m.ADD_REACTIONS, {

@@ -1,10 +1,15 @@
 {
 	"compilerOptions": {
 		"checkJs": true,
+		"noImplicitAny": false,
+		"noImplicitThis": false,
+		"strictNullChecks": false,
 		"target": "ESNext",
 		"module": "ESNext",
 		"jsx": "react",
-		"types": ["betterdiscord"]
+		"jsxFactory": "BdApi.React.createElement",
+		"jsxFragmentFactory": "BdApi.React.Fragment",
+		"types": ["betterdiscord", "discord-types"]
 	},
 	"include": ["src/**/*"]
 }

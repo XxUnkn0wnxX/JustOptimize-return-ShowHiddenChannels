@@ -10,14 +10,17 @@
 	"changelog": [
 		{
 			"title": "v0.6.7 - Fixes",
+			"type": "fixed",
 			"items": ["Fixed plugin crashing on startup.", "67...."]
 		},
 		{
 			"title": "v0.6.6 - Fixes",
+			"type": "fixed",
 			"items": ["Updated modules after Discord update."]
 		},
 		{
 			"title": "v0.6.5 - Bug Fixes",
+			"type": "fixed",
 			"items": ["Fixed RolePill not found."]
 		}
 	]

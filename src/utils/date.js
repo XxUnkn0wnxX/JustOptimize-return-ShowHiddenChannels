@@ -1,6 +1,7 @@
 // @ts-check
 
 import { ModuleStore } from "./modules";
+
 const { Logger, LocaleManager } = ModuleStore;
 
 export function convertToHMS(timeInSeconds) {
