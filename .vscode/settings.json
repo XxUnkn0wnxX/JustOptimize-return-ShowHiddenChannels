@@ -1,4 +1,5 @@
 {
+	"biome.lspBin": "./node_modules/@biomejs/biome/bin/biome",
 	"editor.formatOnSave": true,
 	"conventionalCommits.scopes": ["Settings", "Lockscreen"],
 	"editor.defaultFormatter": "biomejs.biome",
