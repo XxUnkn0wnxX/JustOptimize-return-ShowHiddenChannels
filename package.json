@@ -33,7 +33,8 @@
 			[
 				"@babel/preset-react",
 				{
-					"pragma": "BdApi.React.createElement"
+					"pragma": "BdApi.React.createElement",
+					"pragmaFrag": "BdApi.React.Fragment"
 				}
 			]
 		]

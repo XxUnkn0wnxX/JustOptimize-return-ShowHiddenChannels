@@ -121,10 +121,9 @@ const ChannelItemUtils = WebpackModules.getMangled(
 	},
 );
 
-const RolePillModule = WebpackModules.getBySource("overflow-more-roles-");
-const RolePill = RolePillModule
-	? Object.values(RolePillModule).find((x) => x?.render)
-	: null;
+const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
+	RolePill: (m) => m?.render != null,
+})?.RolePill;
 
 const ChannelPermissionStore = WebpackModules.getByKeys(
 	"getChannelPermissions",
@@ -173,7 +172,7 @@ const Voice = WebpackModules.getByKeys("getVoiceStateStats");
 const UserMentions = WebpackModules.getByKeys("handleUserContextMenu");
 
 const ChannelUtils = WebpackModules.getMangled(".SMALLER,className", {
-	renderTopic: WebpackModules.Filters.byStrings(".GROUP_DM:return null"),
+	renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 });
 if (!ChannelUtils?.renderTopic) {
 	loaded_successfully_internal = false;
