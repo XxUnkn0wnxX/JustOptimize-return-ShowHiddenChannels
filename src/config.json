@@ -1,13 +1,22 @@
 {
 	"name": "ShowHiddenChannels",
 	"displayName": "Show Hidden Channels (SHC)",
-	"version": "0.6.7",
+	"version": "0.6.8",
 	"author": "JustOptimize (Oggetto)",
 	"authorId": "619203349954166804",
 	"source": "https://github.com/JustOptimize/ShowHiddenChannels",
 	"invite": "q4gW3j5FUY",
 	"description": "A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
 	"changelog": [
+		{
+			"title": "v0.6.8 - Fixes",
+			"type": "fixed",
+			"items": [
+				"Updated module queries after Discord update.",
+				"Added some typescript types",
+				"No longer 67 :("
+			]
+		},
 		{
 			"title": "v0.6.7 - Fixes",
 			"type": "fixed",
@@ -17,11 +26,6 @@
 			"title": "v0.6.6 - Fixes",
 			"type": "fixed",
 			"items": ["Updated modules after Discord update."]
-		},
-		{
-			"title": "v0.6.5 - Bug Fixes",
-			"type": "fixed",
-			"items": ["Fixed RolePill not found."]
 		}
 	]
 }
