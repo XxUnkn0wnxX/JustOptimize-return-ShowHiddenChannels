@@ -26,47 +26,6 @@ export default (() => {
 	// biome-ignore lint/security/noGlobalEval: This is a necessary evil
 	const RuntimeRequire = eval("require");
 
-	const { Lockscreen } = require("./components/Lockscreen");
-	const { HiddenChannelIcon } = require("./components/HiddenChannelIcon");
-
-	const {
-		ModuleStore: {
-			/* Library */
-			Utilities,
-			DOMTools,
-			Logger,
-			ReactTools,
-
-			/* Discord Modules (From lib) */
-			ChannelStore,
-			MessageActions,
-			React,
-			GuildChannelStore,
-			NavigationUtils,
-
-			/* BdApi */
-			ContextMenu,
-
-			/* Manually found modules */
-			DiscordConstants,
-			chat,
-			Route,
-			ChannelItemRenderer,
-			ChannelItemUtils,
-			ChannelPermissionStore,
-			PermissionStoreActionHandler,
-			ChannelListStoreActionHandler,
-			container,
-			ChannelRecordBase,
-			ChannelListStore,
-			iconItem,
-			actionIcon,
-			ReadStateStore,
-			Voice,
-			CategoryStore,
-		},
-	} = require("./utils/modules");
-
 	const defaultSettings = {
 		hiddenChannelIcon: "lock",
 		sort: "native",
@@ -106,15 +65,11 @@ export default (() => {
 				defaultSettings,
 				this.api.Data.load("settings"),
 			);
-
-			this.can =
-				ChannelPermissionStore.can.__originalFunction ??
-				ChannelPermissionStore.can;
-
-			Logger.isDebugging = this.settings.debugMode;
 		}
 
 		async checkForUpdates() {
+			const { Logger } = require("./utils/modules").getModules();
+
 			Logger.debug(
 				`Checking for updates, current version: ${config.info.version}`,
 			);
@@ -163,7 +118,28 @@ export default (() => {
 				return Logger.err("Failed to check for updates, version not found.");
 			}
 
-			if (latestRelease <= config.info.version) {
+			const semverGt = (a, b) => {
+				const parse = (v) => {
+					const [base, pre] = v.split("-pre");
+					return {
+						parts: base.split(".").map(Number),
+						pre: pre !== undefined ? Number(pre) : null,
+					};
+				};
+				const av = parse(a);
+				const bv = parse(b);
+				for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
+					const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
+					if (diff !== 0) return diff > 0;
+				}
+				// base versions equal — no pre > pre, higher pre number wins
+				if (av.pre === null && bv.pre !== null) return true;
+				if (av.pre !== null && bv.pre === null) return false;
+				if (av.pre !== null && bv.pre !== null) return av.pre > bv.pre;
+				return false;
+			};
+
+			if (!semverGt(latestRelease, config.info.version)) {
 				return Logger.info("No updates found.");
 			}
 
@@ -199,6 +175,8 @@ export default (() => {
 		}
 
 		async proceedWithUpdate(SHCContent, version) {
+			const { Logger } = require("./utils/modules").getModules();
+
 			Logger.debug(
 				`Update confirmed by the user, updating to version ${version}`,
 			);
@@ -238,7 +216,29 @@ export default (() => {
 			}
 		}
 
-		start() {
+		async start() {
+			console.log(
+				`%c[${config.info.name}] Starting plugin...`,
+				"color: #2f3781; font-weight: bold;",
+			);
+
+			// Wait 1s
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+
+			console.log(
+				`%c[${config.info.name}] Checking for updates...`,
+				"color: #2f3781; font-weight: bold;",
+			);
+
+			const { Logger, ChannelPermissionStore } =
+				require("./utils/modules").getModules();
+
+			Logger.isDebugging = this.settings.debugMode;
+
+			this.can =
+				ChannelPermissionStore.can.__originalFunction ??
+				ChannelPermissionStore.can;
+
 			if (this.settings.checkForUpdates) {
 				this.checkForUpdates();
 			}
@@ -269,6 +269,8 @@ export default (() => {
 		}
 
 		doStart() {
+			const { DOMTools } = require("./utils/modules").getModules();
+
 			const savedVersion = this.api.Data.load("version");
 			if (savedVersion !== this.meta.version) {
 				this.api.UI.showChangelogModal({
@@ -285,7 +287,45 @@ export default (() => {
 		}
 
 		Patch() {
+			const { Lockscreen } = require("./components/Lockscreen");
+			const { HiddenChannelIcon } = require("./components/HiddenChannelIcon");
 			const Patcher = this.api.Patcher;
+
+			const {
+				/* Library */
+				Utilities,
+				// DOMTools,
+				// Logger,
+				// ReactTools,
+
+				/* Discord Modules (From lib) */
+				ChannelStore,
+				MessageActions,
+				React,
+				GuildChannelStore,
+				NavigationUtils,
+
+				/* BdApi */
+				ContextMenu,
+
+				/* Manually found modules */
+				DiscordConstants,
+				chat,
+				Route,
+				ChannelItemRenderer,
+				ChannelItemUtils,
+				ChannelPermissionStore,
+				// PermissionStoreActionHandler,
+				// ChannelListStoreActionHandler,
+				// container,
+				ChannelRecordBase,
+				ChannelListStore,
+				iconItem,
+				actionIcon,
+				ReadStateStore,
+				Voice,
+				CategoryStore,
+			} = require("./utils/modules").getModules();
 
 			// Check for needed modules
 			if (
@@ -476,7 +516,6 @@ export default (() => {
 							m.type === "div",
 						{
 							walkable: ["props", "children", "child", "sibling"],
-							// @ts-expect-error - maxRecursion is valid but missing from BdApi types
 							maxRecursion: 100,
 						},
 					);
@@ -504,7 +543,6 @@ export default (() => {
 							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
 						{
 							walkable: ["props", "children", "child", "sibling"],
-							// @ts-expect-error - maxRecursion is valid but missing from BdApi types
 							maxRecursion: 100,
 						},
 					);
@@ -759,6 +797,8 @@ export default (() => {
 		}
 
 		processContextMenu(menu, { guild }) {
+			const { ContextMenu } = require("./utils/modules").getModules();
+
 			const menuCategory = menu?.props?.children?.find((buttonCategory) => {
 				const children = buttonCategory?.props?.children;
 				return (
@@ -863,6 +903,9 @@ export default (() => {
 		 * @returns {object} - An object containing the hidden channels and the amount of hidden channels.
 		 */
 		getHiddenChannels(guildId) {
+			const { ChannelStore, DiscordConstants } =
+				require("./utils/modules").getModules();
+
 			if (!guildId) {
 				return {
 					channels: [],
@@ -886,6 +929,9 @@ export default (() => {
 		}
 
 		rerenderChannels() {
+			const { container, PermissionStoreActionHandler, ChannelListStoreActionHandler } =
+				require("./utils/modules").getModules();
+
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
 
@@ -899,6 +945,8 @@ export default (() => {
 		 */
 		forceUpdate(element) {
 			if (!element) return;
+
+			const { ReactTools } = require("./utils/modules").getModules();
 
 			const toForceUpdate = ReactTools.getOwnerInstance(element);
 			const forceRerender = this.api.Patcher.instead(
@@ -914,13 +962,18 @@ export default (() => {
 		}
 
 		stop() {
+			const { DOMTools, ContextMenu } = require("./utils/modules").getModules();
+			const { UnloadModules } = require("./utils/modules");
+
 			this.api.Patcher.unpatchAll();
 			DOMTools.removeStyle(config.info.name);
 			ContextMenu?.unpatch("guild-context", this.processContextMenu);
 			this.rerenderChannels();
+			UnloadModules();
 		}
 
 		getSettingsPanel() {
+			const { Logger, React } = require("./utils/modules").getModules();
 			const { SettingsPanel } = require("./components/SettingsPanel");
 
 			return React.createElement(SettingsPanel, {
@@ -949,6 +1002,8 @@ export default (() => {
 		}
 
 		saveSettings() {
+			const { Logger } = require("./utils/modules").getModules();
+
 			this.api.Data.save("settings", this.settings);
 			Logger.debug("Settings saved.", this.settings);
 			this.rerenderChannels();
