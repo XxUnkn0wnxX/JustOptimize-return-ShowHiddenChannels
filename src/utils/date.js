@@ -1,8 +1,8 @@
 // @ts-check
 
-import { ModuleStore } from "./modules";
+import { getModules } from "./modules";
 
-const { Logger, LocaleManager } = ModuleStore;
+const { Logger, LocaleManager } = getModules();
 
 export function convertToHMS(timeInSeconds) {
 	const hours = Math.floor(timeInSeconds / 3600);

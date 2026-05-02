@@ -1,9 +1,9 @@
 // @ts-check
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const {
 	Components: { TextElement },
-} = ModuleStore;
+} = getModules();
 
 export default function ForumComponent({ channel }) {
 	if (channel.type !== 15) return null;

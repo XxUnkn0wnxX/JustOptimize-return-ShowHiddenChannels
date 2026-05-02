@@ -1,11 +1,11 @@
 // @ts-check
 
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const {
 	React,
 	Components: { Tooltip },
-} = ModuleStore;
+} = getModules();
 
 function HiddenChannelComponent({ icon, iconItem, actionIcon }) {
 	return (

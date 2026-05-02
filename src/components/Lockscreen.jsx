@@ -1,7 +1,7 @@
 // @ts-check
 
 import { convertToHMS, getDateFromSnowflake } from "../utils/date";
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 import AdminRolesComponent from "./AdminRolesComponent";
 import ChannelRolesComponent from "./ChannelRolesComponent";
 import ForumComponent from "./ForumComponent";
@@ -13,7 +13,7 @@ const {
 	GuildRoleStore,
 	ChannelUtils,
 	React,
-} = ModuleStore;
+} = getModules();
 
 const CHANNEL_TYPES = {
 	0: "text",

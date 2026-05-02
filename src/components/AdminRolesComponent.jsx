@@ -1,13 +1,13 @@
 // @ts-check
 
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const {
 	Components: { TextElement },
 	RolePill,
 	DiscordConstants,
 	React,
-} = ModuleStore;
+} = getModules();
 
 const AdminRolesElement = ({ guild, settings, roles }) => {
 	if (!settings.showAdmin) return null;

@@ -1,12 +1,12 @@
 // @ts-check
 
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const {
 	Components: { TextElement },
 	RolePill,
 	DiscordConstants,
-} = ModuleStore;
+} = getModules();
 
 export default function ChannelRolesComponent({
 	channel,

@@ -1,8 +1,8 @@
 // @ts-check
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const { Logger, DiscordConstants, GuildStore, ImageResolver, DEFAULT_AVATARS } =
-	ModuleStore;
+	getModules();
 
 const {
 	Components: {

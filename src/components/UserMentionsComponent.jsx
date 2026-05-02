@@ -1,6 +1,6 @@
 // @ts-check
 
-import { ModuleStore } from "../utils/modules";
+import { getModules } from "../utils/modules";
 
 const {
 	React,
@@ -11,7 +11,7 @@ const {
 	DiscordConstants,
 	PermissionUtils,
 	Components: { TextElement },
-} = ModuleStore;
+} = getModules();
 
 export default function UserMentionsComponent({ channel, guild, settings }) {
 	const [userMentionComponents, setUserMentionComponents] = React.useState([
