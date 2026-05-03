@@ -70,7 +70,10 @@ export default (() => {
 		semverGt(a, b) {
 			const parse = (v) => {
 				const [base, pre] = v.split("-pre");
-				return { parts: base.split(".").map(Number), pre: pre !== undefined ? Number(pre) : null };
+				return {
+					parts: base.split(".").map(Number),
+					pre: pre !== undefined ? Number(pre) : null,
+				};
 			};
 			const av = parse(a);
 			const bv = parse(b);
@@ -248,19 +251,19 @@ export default (() => {
 
 			Logger.info(`Checking for updates...`);
 
+			Logger.isDebugging = this.settings.debugMode;
+
+			if (this.settings.checkForUpdates) {
+				await this.checkForUpdates();
+			}
+
 			// First call to the modules loader
 			const { ChannelPermissionStore } =
 				require("./utils/modules").getModules();
 
-			Logger.isDebugging = this.settings.debugMode;
-
 			this.can =
 				ChannelPermissionStore.can.__originalFunction ??
 				ChannelPermissionStore.can;
-
-			if (this.settings.checkForUpdates) {
-				this.checkForUpdates();
-			}
 
 			const { loaded_successfully } = require("./utils/modules");
 
