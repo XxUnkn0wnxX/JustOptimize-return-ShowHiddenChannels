@@ -13,10 +13,10 @@
 			"title": "v6.9 - Lazy Module Loading",
 			"type": "changed",
 			"items": [
-				"Modules are now loaded lazily on first use instead of at import time, fixing potential startup failures when Discord's webpack isn't ready.",
-				"Fixed plugin stop sequence — channels now rerender before the module cache is cleared.",
+				"Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.",
+				"Fixed plugin stop sequence, channels now rerender before the module cache is cleared.",
 				"Added runAt: idle to ensure the plugin starts after Discord is fully loaded.",
-				"Dropped the 0. version prefix and fixed version comparison to be numeric (no more false 'up to date' on double-digit patches).",
+				"Dropped the 0. version prefix and fixed version comparison to be numeric.",
 				"Added pre-release version support (e.g. 6.9-pre1).",
 				"69... (nice)"
 			]
