@@ -1,6 +1,6 @@
 // @ts-check
 
-const Logger = {
+export const Logger = {
 	isDebugging: false,
 	_log: (type, color, ...x) => {
 		const line = new Error().stack || "";
@@ -54,6 +54,7 @@ const WebpackModules = BdApi.Webpack;
 
 export function getModules() {
 	if (cachedModules) return cachedModules;
+	loaded_successfully = true;
 	const DiscordPermissions = WebpackModules.getModule((m) => m.ADD_REACTIONS, {
 		searchExports: true,
 	});
@@ -84,7 +85,7 @@ export function getModules() {
 		},
 	);
 
-	if (!NavigationUtils.transitionTo) {
+	if (!NavigationUtils?.transitionTo) {
 		loaded_successfully = false;
 		Logger.err("Failed to load NavigationUtils", NavigationUtils);
 	}
