@@ -12,6 +12,7 @@ on:
       - "package.json"
       - "webpack.config.js"
       - "jsconfig.json"
+      - "assets/**"
 
 permissions:
   contents: write

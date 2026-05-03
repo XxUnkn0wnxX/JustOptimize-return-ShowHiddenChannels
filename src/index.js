@@ -57,6 +57,10 @@ export default (() => {
 			this.api = new BdApi(meta.name);
 
 			this.hiddenChannelCache = {};
+			this.channelListObserver = null;
+			this.pendingDecorationFrame = 0;
+			this.hasRendererHiddenIconPatch = false;
+			this.hiddenIconRetryInterval = null;
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -174,6 +178,14 @@ export default (() => {
 			);
 		}
 
+		shouldDecorateHiddenChannel(channel) {
+			const { DiscordConstants } = require("./utils/modules").getModules();
+			return (
+				channel?.isHidden?.() &&
+				channel.type !== DiscordConstants.ChannelTypes.GUILD_CATEGORY
+			);
+		}
+
 		async proceedWithUpdate(SHCContent, version) {
 			const { Logger } = require("./utils/modules").getModules();
 
@@ -222,7 +234,7 @@ export default (() => {
 				"color: #2f3781; font-weight: bold;",
 			);
 
-			// Wait 1s
+			// Keep the upstream idle delay, but let optional module drift fail soft elsewhere.
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 
 			console.log(
@@ -236,8 +248,8 @@ export default (() => {
 			Logger.isDebugging = this.settings.debugMode;
 
 			this.can =
-				ChannelPermissionStore.can.__originalFunction ??
-				ChannelPermissionStore.can;
+				ChannelPermissionStore?.can?.__originalFunction ??
+				ChannelPermissionStore?.can;
 
 			if (this.settings.checkForUpdates) {
 				this.checkForUpdates();
@@ -363,53 +375,53 @@ export default (() => {
 						type: "warning",
 					},
 				);
-			}
+			} else {
+				Patcher.after(
+					ReadStateStore,
+					"getGuildChannelUnreadState",
+					(_, args, res) => {
+						if (this.settings.MarkUnread) return res;
 
-			Patcher.after(
-				ReadStateStore,
-				"getGuildChannelUnreadState",
-				(_, args, res) => {
+						const [channel] = /** @type {[SHCChannel]} */ (args);
+						return channel?.isHidden()
+							? {
+									mentionCount: 0,
+									unread: false,
+								}
+							: res;
+					},
+				);
+
+				Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
 					if (this.settings.MarkUnread) return res;
 
-					const [channel] = /** @type {[SHCChannel]} */ (args);
-					return channel?.isHidden()
-						? {
-								mentionCount: 0,
-								unread: false,
-							}
-						: res;
-				},
-			);
+					return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				});
 
-			Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
-			});
+					return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				});
 
-			Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
 
-			Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
 
-			Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
-
-			Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
-
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
+			}
 
 			//* Make hidden channel visible
 			Patcher.after(ChannelPermissionStore, "can", (_, args, res) => {
@@ -439,30 +451,28 @@ export default (() => {
 						type: "warning",
 					},
 				);
+			} else {
+				Patcher.after(Route, "A", (_, _args, res) => {
+					const channelId = res.props?.computedMatch?.params?.channelId;
+					const guildId = res.props?.computedMatch?.params?.guildId;
+					const channel = ChannelStore?.getChannel(channelId);
+
+					if (
+						guildId &&
+						channel?.isHidden?.() &&
+						channel?.id !== Voice.getChannelId()
+					) {
+						res.props.render = () =>
+							React.createElement(Lockscreen, {
+								chat,
+								channel,
+								settings: this.settings,
+							});
+					}
+
+					return res;
+				});
 			}
-
-			Patcher.after(Route, "A", (_, _args, res) => {
-				if (!Voice || !Route) return res;
-
-				const channelId = res.props?.computedMatch?.params?.channelId;
-				const guildId = res.props?.computedMatch?.params?.guildId;
-				const channel = ChannelStore?.getChannel(channelId);
-
-				if (
-					guildId &&
-					channel?.isHidden?.() &&
-					channel?.id !== Voice.getChannelId()
-				) {
-					res.props.render = () =>
-						React.createElement(Lockscreen, {
-							chat,
-							channel,
-							settings: this.settings,
-						});
-				}
-
-				return res;
-			});
 
 			//* Stop fetching messages if the channel is hidden
 			if (!MessageActions?.fetchMessages) {
@@ -472,105 +482,39 @@ export default (() => {
 						type: "warning",
 					},
 				);
+			} else {
+				Patcher.instead(
+					MessageActions,
+					"fetchMessages",
+					(instance, args, res) => {
+						const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
+						if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
+							return;
+						}
+
+						return res.call(instance, fetchConfig);
+					},
+				);
 			}
 
-			Patcher.instead(
-				MessageActions,
-				"fetchMessages",
-				(instance, args, res) => {
-					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
-					if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
-						return;
-					}
-
-					return res.call(instance, fetchConfig);
-				},
-			);
-
 			if (this.settings.hiddenChannelIcon) {
-				if (!ChannelItemRenderer) {
-					this.api.UI.showToast(
-						"(SHC) ChannelItemRenderer module is missing, channel lock icon won't be shown.",
-						{
-							type: "warning",
-						},
-					);
+				if (!ChannelItemRenderer || !iconItem || !actionIcon) {
+					// Keep icons visible immediately, then upgrade back to Discord's real renderer path once those modules load.
+					this.startChannelItemDomFallback();
+					this.startHiddenIconRetry();
+				} else {
+					this.patchHiddenChannelRenderer({
+						Patcher,
+						Utilities,
+						React,
+						HiddenChannelIcon,
+						NavigationUtils,
+						DiscordConstants,
+						ChannelItemRenderer,
+						iconItem,
+						actionIcon,
+					});
 				}
-
-				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
-					const [instance] =
-						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!instance?.channel?.isHidden()) {
-						return res;
-					}
-
-					const item = res?.props?.children?.props;
-					if (item?.className) {
-						item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
-					}
-
-					const children = Utilities.findInTree(
-						res,
-						(m) =>
-							m?.props?.onClick?.toString().includes("stopPropagation") &&
-							m.type === "div",
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (children.props?.children) {
-						children.props.children = [
-							React.createElement(HiddenChannelIcon, {
-								icon: this.settings.hiddenChannelIcon,
-								iconItem: iconItem,
-								actionIcon: actionIcon,
-							}),
-						];
-					}
-
-					const isInCallInThisChannel =
-						instance.channel.type ===
-							DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
-					if (!isInCallInThisChannel) {
-						return res;
-					}
-
-					const wrapper = Utilities.findInTree(
-						res,
-						(channel) =>
-							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (!wrapper) {
-						return res;
-					}
-
-					wrapper.props.onMouseDown = () => {};
-					wrapper.props.onMouseUp = () => {};
-
-					const mainContent = wrapper?.props?.children[1]?.props?.children;
-
-					if (!mainContent) {
-						return res;
-					}
-
-					mainContent.props.onClick = () => {
-						if (instance.channel?.isGuildVocal()) {
-							NavigationUtils.transitionTo(
-								`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
-							);
-						}
-					};
-					mainContent.props.href = null;
-
-					return res;
-				});
 			}
 
 			//* Remove lock icon from hidden voice channels
@@ -935,7 +879,327 @@ export default (() => {
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
 
-			this.forceUpdate(document.querySelector(`.${container}`));
+			this.forceUpdate(this.findChannelTreeContainer(container));
+			this.scheduleHiddenChannelDecoration();
+		}
+
+		startHiddenIconRetry() {
+			if (this.hiddenIconRetryInterval || this.hasRendererHiddenIconPatch) {
+				return;
+			}
+
+			this.hiddenIconRetryInterval = setInterval(() => {
+				this.tryUpgradeHiddenIconRenderer();
+			}, 1000);
+		}
+
+		stopHiddenIconRetry() {
+			if (!this.hiddenIconRetryInterval) {
+				return;
+			}
+
+			clearInterval(this.hiddenIconRetryInterval);
+			this.hiddenIconRetryInterval = null;
+		}
+
+		tryUpgradeHiddenIconRenderer() {
+			if (this.hasRendererHiddenIconPatch || !this.settings.hiddenChannelIcon) {
+				this.stopHiddenIconRetry();
+				return;
+			}
+
+			const moduleLoader = require("./utils/modules");
+			moduleLoader.UnloadModules();
+			const modules = moduleLoader.getModules();
+			const { HiddenChannelIcon } = require("./components/HiddenChannelIcon");
+
+			if (
+				!modules.ChannelItemRenderer ||
+				!modules.iconItem ||
+				!modules.actionIcon
+			) {
+				return;
+			}
+
+			this.patchHiddenChannelRenderer({
+				Patcher: this.api.Patcher,
+				Utilities: modules.Utilities,
+				React: modules.React,
+				HiddenChannelIcon,
+				NavigationUtils: modules.NavigationUtils,
+				DiscordConstants: modules.DiscordConstants,
+				ChannelItemRenderer: modules.ChannelItemRenderer,
+				iconItem: modules.iconItem,
+				actionIcon: modules.actionIcon,
+			});
+			this.stopChannelItemDomFallback();
+			this.stopHiddenIconRetry();
+			this.rerenderChannels();
+		}
+
+		startChannelItemDomFallback() {
+			if (this.channelListObserver) {
+				return;
+			}
+
+			const fallbackTarget = this.findChannelTreeContainer() ?? document.body;
+			if (!fallbackTarget) {
+				return;
+			}
+
+			this.channelListObserver = new MutationObserver(() => {
+				this.scheduleHiddenChannelDecoration();
+			});
+			this.channelListObserver.observe(fallbackTarget, {
+				childList: true,
+				subtree: true,
+			});
+
+			this.scheduleHiddenChannelDecoration();
+		}
+
+		stopChannelItemDomFallback() {
+			if (this.pendingDecorationFrame) {
+				cancelAnimationFrame(this.pendingDecorationFrame);
+				this.pendingDecorationFrame = 0;
+			}
+
+			this.channelListObserver?.disconnect();
+			this.channelListObserver = null;
+
+			for (const element of document.querySelectorAll(".shc-hidden-channel")) {
+				element.classList.remove("shc-hidden-channel");
+				for (const className of [...element.classList]) {
+					if (className.startsWith("shc-hidden-channel-type-")) {
+						element.classList.remove(className);
+					}
+				}
+			}
+
+			for (const badge of document.querySelectorAll(".shc-hidden-channel-badge")) {
+				badge.remove();
+			}
+		}
+
+		scheduleHiddenChannelDecoration() {
+			if (!this.settings.hiddenChannelIcon || this.pendingDecorationFrame) {
+				return;
+			}
+
+			this.pendingDecorationFrame = requestAnimationFrame(() => {
+				this.pendingDecorationFrame = 0;
+				this.decorateHiddenChannelItems();
+			});
+		}
+
+		decorateHiddenChannelItems() {
+			const { ChannelStore } = require("./utils/modules").getModules();
+
+			for (const item of document.querySelectorAll('[data-list-item-id^="channels___"]')) {
+				const channelId = this.extractChannelIdFromElement(item);
+				if (!channelId) {
+					continue;
+				}
+
+				const channel = ChannelStore.getChannel(channelId);
+				const row = this.findDecoratedChannelElement(item);
+				if (!row) {
+					continue;
+				}
+
+				const hiddenTypeClasses = [...row.classList].filter((className) =>
+					className.startsWith("shc-hidden-channel-type-"),
+				);
+				if (!this.shouldDecorateHiddenChannel(channel)) {
+					row.classList.remove("shc-hidden-channel", ...hiddenTypeClasses);
+					row.querySelector(".shc-hidden-channel-badge")?.remove();
+					continue;
+				}
+
+				row.classList.add("shc-hidden-channel");
+				row.classList.remove(...hiddenTypeClasses);
+				if (channel?.type != null) {
+					row.classList.add(`shc-hidden-channel-type-${channel.type}`);
+				}
+
+				this.ensureHiddenChannelBadge(row);
+			}
+		}
+
+		ensureHiddenChannelBadge(row) {
+			let badge = row.querySelector(".shc-hidden-channel-badge");
+			if (!badge) {
+				badge = document.createElement("span");
+				badge.className = "shc-hidden-channel-badge";
+				badge.setAttribute("aria-hidden", "true");
+				badge.style.display = "inline-flex";
+				badge.style.alignItems = "center";
+				badge.style.justifyContent = "center";
+				badge.style.marginLeft = "auto";
+				badge.style.minWidth = "16px";
+				badge.innerHTML =
+					this.settings.hiddenChannelIcon === "eye"
+						? '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M12 5C5.648 5 1 12 1 12C1 12 5.648 19 12 19C18.352 19 23 12 23 12C23 12 18.352 5 12 5ZM12 16C9.791 16 8 14.21 8 12C8 9.79 9.791 8 12 8C14.209 8 16 9.79 16 12C16 14.21 14.209 16 12 16Z"/><path fill="currentColor" d="M12 14C13.1046 14 14 13.1046 14 12C14 10.8954 13.1046 10 12 10C10.8954 10 10 10.8954 10 12C10 13.1046 10.8954 14 12 14Z"/></svg>'
+						: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M17 11V7C17 4.243 14.756 2 12 2C9.242 2 7 4.243 7 7V11C5.897 11 5 11.896 5 13V20C5 21.103 5.897 22 7 22H17C18.103 22 19 21.103 19 20V13C19 11.896 18.103 11 17 11ZM12 18C11.172 18 10.5 17.328 10.5 16.5C10.5 15.672 11.172 15 12 15C12.828 15 13.5 15.672 13.5 16.5C13.5 17.328 12.828 18 12 18ZM15 11H9V7C9 5.346 10.346 4 12 4C13.654 4 15 5.346 15 7V11Z"/></svg>';
+				row.appendChild(badge);
+			}
+
+			// Prefer the row's existing icon color, then fall back to Discord's normal channel icon color.
+			badge.style.color = this.getHiddenChannelBadgeColor(row, badge);
+		}
+
+		getHiddenChannelBadgeColor(row, badge) {
+			const referenceIcon = [...row.querySelectorAll("svg")].find(
+				(icon) => !badge.contains(icon),
+			);
+			const referenceElement =
+				referenceIcon?.parentElement ||
+				row.querySelector('[class*="icon"], [class*="Icon"]');
+
+			if (referenceElement) {
+				const { color } = getComputedStyle(referenceElement);
+				if (color) {
+					return color;
+				}
+			}
+
+			return "var(--channels-default)";
+		}
+
+		patchHiddenChannelRenderer({
+			Patcher,
+			Utilities,
+			React,
+			HiddenChannelIcon,
+			NavigationUtils,
+			DiscordConstants,
+			ChannelItemRenderer,
+			iconItem,
+			actionIcon,
+		}) {
+			if (this.hasRendererHiddenIconPatch) {
+				return;
+			}
+
+			this.hasRendererHiddenIconPatch = true;
+
+			Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
+				const [instance] =
+					/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
+				if (!this.shouldDecorateHiddenChannel(instance?.channel)) {
+					return res;
+				}
+
+				const item = res?.props?.children?.props;
+				if (item?.className) {
+					item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
+				}
+
+				const children = Utilities.findInTree(
+					res,
+					(m) =>
+						m?.props?.onClick?.toString().includes("stopPropagation") &&
+						m.type === "div",
+					{
+						walkable: ["props", "children", "child", "sibling"],
+						maxRecursion: 100,
+					},
+				);
+
+				if (children?.props?.children) {
+					children.props.children = [
+						React.createElement(HiddenChannelIcon, {
+							icon: this.settings.hiddenChannelIcon,
+							iconItem: iconItem,
+							actionIcon: actionIcon,
+						}),
+					];
+				}
+
+				const isInCallInThisChannel =
+					instance.channel.type ===
+						DiscordConstants.ChannelTypes.GUILD_VOICE &&
+					!instance.connected;
+				if (!isInCallInThisChannel) {
+					return res;
+				}
+
+				const wrapper = Utilities.findInTree(
+					res,
+					(channel) =>
+						channel?.props?.className?.includes("shc-hidden-channel-type-2"),
+					{
+						walkable: ["props", "children", "child", "sibling"],
+						maxRecursion: 100,
+					},
+				);
+
+				if (!wrapper) {
+					return res;
+				}
+
+				wrapper.props.onMouseDown = () => {};
+				wrapper.props.onMouseUp = () => {};
+
+				const mainContent = wrapper?.props?.children[1]?.props?.children;
+
+				if (!mainContent) {
+					return res;
+				}
+
+				mainContent.props.onClick = () => {
+					if (instance.channel?.isGuildVocal()) {
+						NavigationUtils.transitionTo(
+							`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
+						);
+					}
+				};
+				mainContent.props.href = null;
+
+				return res;
+			});
+		}
+
+		findChannelTreeContainer(container) {
+			const channelTree =
+				container && document.querySelector(`.${container}`);
+			if (channelTree) {
+				return channelTree;
+			}
+
+			// Discord's container class changes often, so fall back to the channel list itself.
+			return (
+				document.querySelector('[data-list-id="channels"]') ||
+				document
+					.querySelector('[data-list-item-id^="channels___"]')
+					?.closest?.('[class]')
+			);
+		}
+
+		findDecoratedChannelElement(item) {
+			return (
+				item.querySelector('a[href^="/channels/"]') ||
+				item.querySelector('[role="link"]') ||
+				item.firstElementChild ||
+				item
+			);
+		}
+
+		extractChannelIdFromElement(element) {
+			const listItem = element?.closest?.('[data-list-item-id^="channels___"]');
+			const dataListId = listItem?.getAttribute("data-list-item-id");
+			if (dataListId?.startsWith("channels___")) {
+				return dataListId.replace("channels___", "");
+			}
+
+			const anchor = element?.closest?.('a[href^="/channels/"]');
+			const href = anchor?.getAttribute("href");
+			if (!href) {
+				return null;
+			}
+
+			const parts = href.split("/").filter(Boolean);
+			return parts.at(-1) ?? null;
 		}
 
 		/**
@@ -949,6 +1213,7 @@ export default (() => {
 			const { ReactTools } = require("./utils/modules").getModules();
 
 			const toForceUpdate = ReactTools.getOwnerInstance(element);
+			if (!toForceUpdate) return;
 			const forceRerender = this.api.Patcher.instead(
 				toForceUpdate,
 				"render",
@@ -966,6 +1231,9 @@ export default (() => {
 			const { UnloadModules } = require("./utils/modules");
 
 			this.api.Patcher.unpatchAll();
+			this.stopChannelItemDomFallback();
+			this.stopHiddenIconRetry();
+			this.hasRendererHiddenIconPatch = false;
 			DOMTools.removeStyle(config.info.name);
 			ContextMenu?.unpatch("guild-context", this.processContextMenu);
 			this.rerenderChannels();

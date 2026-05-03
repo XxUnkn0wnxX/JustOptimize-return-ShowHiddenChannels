@@ -21,7 +21,7 @@ export default function UserMentionsComponent({ channel, guild, settings }) {
 	const fetchMemberAndMap = async () => {
 		setUserMentionComponents(["Loading..."]);
 
-		if (!settings.showPerms) {
+		if (!settings.showPerms || !channel?.permissionOverwrites || !guild?.id) {
 			return setUserMentionComponents(["None"]);
 		}
 
@@ -31,6 +31,9 @@ export default function UserMentionsComponent({ channel, guild, settings }) {
 
 		for (const user of allUserOverwrites) {
 			if (UserStore.getUser(user.id)) continue;
+
+			// Profile lookups are optional; keep rendering known members if this module drifts.
+			if (!ProfileActions?.fetchProfile) break;
 
 			await ProfileActions.fetchProfile(user.id, {
 				guildId: guild.id,
@@ -62,16 +65,20 @@ export default function UserMentionsComponent({ channel, guild, settings }) {
 		}
 
 		const mentionArray = filteredUserOverwrites.map((m) =>
-			UserMentions.react(
-				{
-					userId: m.id,
-					channelId: channel.id,
-				},
-				() => null,
-				{
-					noStyleAndInteraction: false,
-				},
-			),
+			UserMentions?.react
+				? UserMentions.react(
+						{
+							userId: m.id,
+							channelId: channel.id,
+						},
+						() => null,
+						{
+							noStyleAndInteraction: false,
+						},
+					)
+				: UserStore.getUser(m.id)?.globalName ??
+					UserStore.getUser(m.id)?.username ??
+					m.id,
 		);
 
 		return setUserMentionComponents(mentionArray);
