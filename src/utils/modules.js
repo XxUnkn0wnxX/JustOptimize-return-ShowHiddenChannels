@@ -5,7 +5,11 @@ export const Logger = {
 	_log: (type, color, ...x) => {
 		const line = new Error().stack || "";
 		const lines = line.split("\n");
-		console[type](
+
+		// console.debug does not work in stable
+		const consoleMethod = type === "debug" ? "log" : type;
+
+		console[consoleMethod](
 			`%c SHC %c ${type.toUpperCase()} %c`,
 			"background: #5968f0; color: white; font-weight: bold; border-radius: 5px;",
 			`background: ${color}; color: black; font-weight: bold; border-radius: 5px; margin-left: 5px;`,
