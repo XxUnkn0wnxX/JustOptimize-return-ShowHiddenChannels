@@ -68,7 +68,7 @@ export default (() => {
 		}
 
 		async checkForUpdates() {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			Logger.debug(
 				`Checking for updates, current version: ${config.info.version}`,
@@ -175,7 +175,7 @@ export default (() => {
 		}
 
 		async proceedWithUpdate(SHCContent, version) {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			Logger.debug(
 				`Update confirmed by the user, updating to version ${version}`,
@@ -217,20 +217,32 @@ export default (() => {
 		}
 
 		async start() {
-			console.log(
-				`%c[${config.info.name}] Starting plugin...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			const { Logger } = require("./utils/modules");
 
-			// Wait 1s
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			Logger.info(`Starting plugin...`);
 
-			console.log(
-				`%c[${config.info.name}] Checking for updates...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			await new Promise((resolve) => {
+				const start = Date.now();
+				const interval = setInterval(() => {
+					const container = BdApi.Webpack.getByKeys(
+						"container",
+						"hubContainer",
+					)?.container;
+					if (container) {
+						clearInterval(interval);
+						resolve();
+					} else if (Date.now() - start >= 10000) {
+						clearInterval(interval);
+						Logger.error("Timed out waiting for container module after 10s");
+						resolve();
+					}
+				}, 500);
+			});
 
-			const { Logger, ChannelPermissionStore } =
+			Logger.info(`Checking for updates...`);
+
+			// First call to the modules loader
+			const { ChannelPermissionStore } =
 				require("./utils/modules").getModules();
 
 			Logger.isDebugging = this.settings.debugMode;
@@ -249,7 +261,7 @@ export default (() => {
 				this.doStart();
 			} else {
 				this.api.UI.showConfirmationModal(
-					"(SHC) Broken Modules",
+					`(SHC v${config.info.version}) Broken Modules`,
 					"ShowHiddenChannels has detected that some modules are broken, would you like to start anyway? (This might break the plugin or Discord itself)",
 					{
 						confirmText: "Start anyway",
@@ -929,8 +941,11 @@ export default (() => {
 		}
 
 		rerenderChannels() {
-			const { container, PermissionStoreActionHandler, ChannelListStoreActionHandler } =
-				require("./utils/modules").getModules();
+			const {
+				container,
+				PermissionStoreActionHandler,
+				ChannelListStoreActionHandler,
+			} = require("./utils/modules").getModules();
 
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
@@ -1002,7 +1017,7 @@ export default (() => {
 		}
 
 		saveSettings() {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			this.api.Data.save("settings", this.settings);
 			Logger.debug("Settings saved.", this.settings);
