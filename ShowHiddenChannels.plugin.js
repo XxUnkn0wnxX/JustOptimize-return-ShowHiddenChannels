@@ -1,7 +1,7 @@
 /**
  * @name ShowHiddenChannels
  * @displayName Show Hidden Channels (SHC)
- * @version 6.9
+ * @version 6.10
  * @author JustOptimize (Oggetto)
  * @authorId 619203349954166804
  * @source https://github.com/JustOptimize/ShowHiddenChannels
@@ -900,6 +900,7 @@ function getDateFromSnowflake(snowflake) {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Logger: () => (/* binding */ Logger),
 /* harmony export */   UnloadModules: () => (/* binding */ UnloadModules),
 /* harmony export */   getModules: () => (/* binding */ getModules),
 /* harmony export */   loaded_successfully: () => (/* binding */ loaded_successfully)
@@ -911,7 +912,11 @@ const Logger = {
 	_log: (type, color, ...x) => {
 		const line = new Error().stack || "";
 		const lines = line.split("\n");
-		console[type](
+
+		// console.debug does not work in stable
+		const consoleMethod = type === "debug" ? "log" : type;
+
+		console[consoleMethod](
 			`%c SHC %c ${type.toUpperCase()} %c`,
 			"background: #5968f0; color: white; font-weight: bold; border-radius: 5px;",
 			`background: ${color}; color: black; font-weight: bold; border-radius: 5px; margin-left: 5px;`,
@@ -1324,11 +1329,11 @@ const config = {
 		],
 		description:
 			"A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
-		version: "6.9",
+		version: "6.10",
 		github: "https://github.com/JustOptimize/ShowHiddenChannels",
 	},
 
-	changelog: [{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]},{"title":"v0.6.7 - Fixes","type":"fixed","items":["Fixed plugin crashing on startup.","67...."]}],
+	changelog: [{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
 
 	main: "ShowHiddenChannels.plugin.js",
 	github_short: "JustOptimize/ShowHiddenChannels",
@@ -1381,8 +1386,28 @@ const config = {
 			);
 		}
 
+		semverGt(a, b) {
+			const parse = (v) => {
+				const [base, pre] = v.split("-pre");
+				return {
+					parts: base.split(".").map(Number),
+					pre: pre !== undefined ? Number(pre) : null,
+				};
+			};
+			const av = parse(a);
+			const bv = parse(b);
+			for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
+				const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
+				if (diff !== 0) return diff > 0;
+			}
+			// stable > pre-release; higher pre number wins between two pre-releases
+			if (av.pre === null && bv.pre !== null) return true;
+			if (av.pre !== null && bv.pre === null) return false;
+			return av.pre !== null && av.pre > bv.pre;
+		}
+
 		async checkForUpdates() {
-			const { Logger } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
 			Logger.debug(
 				`Checking for updates, current version: ${config.info.version}`,
@@ -1415,9 +1440,20 @@ const config = {
 				m.assets.some((n) => n.name === config.main),
 			);
 
-			const latestRelease = this.settings.usePreRelease
-				? releases[0]?.tag_name?.replace("v", "")
-				: releases.find((m) => !m.prerelease)?.tag_name?.replace("v", "");
+			const latestStable = releases
+				.find((m) => !m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestPreRelease = releases
+				.find((m) => m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestRelease =
+				this.settings.usePreRelease && latestPreRelease && latestStable
+					? this.semverGt(latestPreRelease, latestStable)
+						? latestPreRelease
+						: latestStable
+					: this.settings.usePreRelease && latestPreRelease
+						? latestPreRelease
+						: latestStable;
 
 			Logger.debug(
 				`Latest version: ${latestRelease}, pre-release: ${!!this.settings.usePreRelease}`,
@@ -1432,28 +1468,7 @@ const config = {
 				return Logger.err("Failed to check for updates, version not found.");
 			}
 
-			const semverGt = (a, b) => {
-				const parse = (v) => {
-					const [base, pre] = v.split("-pre");
-					return {
-						parts: base.split(".").map(Number),
-						pre: pre !== undefined ? Number(pre) : null,
-					};
-				};
-				const av = parse(a);
-				const bv = parse(b);
-				for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
-					const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
-					if (diff !== 0) return diff > 0;
-				}
-				// base versions equal — no pre > pre, higher pre number wins
-				if (av.pre === null && bv.pre !== null) return true;
-				if (av.pre !== null && bv.pre === null) return false;
-				if (av.pre !== null && bv.pre !== null) return av.pre > bv.pre;
-				return false;
-			};
-
-			if (!semverGt(latestRelease, config.info.version)) {
+			if (!this.semverGt(latestRelease, config.info.version)) {
 				return Logger.info("No updates found.");
 			}
 
@@ -1497,7 +1512,7 @@ const config = {
 		}
 
 		async proceedWithUpdate(SHCContent, version) {
-			const { Logger } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
 			Logger.debug(
 				`Update confirmed by the user, updating to version ${version}`,
@@ -1539,31 +1554,43 @@ const config = {
 		}
 
 		async start() {
-			console.log(
-				`%c[${config.info.name}] Starting plugin...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
-			// Keep the upstream idle delay, but let optional module drift fail soft elsewhere.
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			Logger.info(`Starting plugin...`);
 
-			console.log(
-				`%c[${config.info.name}] Checking for updates...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			await new Promise((resolve) => {
+				const start = Date.now();
+				const interval = setInterval(() => {
+					const container = BdApi.Webpack.getByKeys(
+						"container",
+						"hubContainer",
+					)?.container;
+					if (container) {
+						clearInterval(interval);
+						resolve();
+					} else if (Date.now() - start >= 10000) {
+						clearInterval(interval);
+						Logger.error("Timed out waiting for container module after 10s");
+						resolve();
+					}
+				}, 500);
+			});
 
-			const { Logger, ChannelPermissionStore } =
-				(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			Logger.info(`Checking for updates...`);
 
 			Logger.isDebugging = this.settings.debugMode;
+
+			if (this.settings.checkForUpdates) {
+				await this.checkForUpdates();
+			}
+
+			// First call to the modules loader
+			const { ChannelPermissionStore } =
+				(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 
 			this.can =
 				ChannelPermissionStore?.can?.__originalFunction ??
 				ChannelPermissionStore?.can;
-
-			if (this.settings.checkForUpdates) {
-				this.checkForUpdates();
-			}
 
 			const { loaded_successfully } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
@@ -1571,7 +1598,7 @@ const config = {
 				this.doStart();
 			} else {
 				this.api.UI.showConfirmationModal(
-					"(SHC) Broken Modules",
+					`(SHC v${config.info.version}) Broken Modules`,
 					"ShowHiddenChannels has detected that some modules are broken, would you like to start anyway? (This might break the plugin or Discord itself)",
 					{
 						confirmText: "Start anyway",
@@ -2182,8 +2209,11 @@ const config = {
 		}
 
 		rerenderChannels() {
-			const { container, PermissionStoreActionHandler, ChannelListStoreActionHandler } =
-				(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			const {
+				container,
+				PermissionStoreActionHandler,
+				ChannelListStoreActionHandler,
+			} = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
@@ -2429,7 +2459,7 @@ const config = {
 		}
 
 		saveSettings() {
-			const { Logger } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
 			this.api.Data.save("settings", this.settings);
 			Logger.debug("Settings saved.", this.settings);
