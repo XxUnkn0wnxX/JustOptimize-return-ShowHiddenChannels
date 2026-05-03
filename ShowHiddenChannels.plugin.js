@@ -42,6 +42,7 @@ const AdminRolesElement = ({
 }) => {
   if (!settings.showAdmin) return null;
   if (settings.showAdmin === "channel") return null;
+  if (!guild?.id || !roles) return null;
   const adminRoles = [];
   for (const role of Object.values(roles)) {
     if ((role.permissions & BigInt(8)) === BigInt(8) && (settings.showAdmin === "include" || settings.showAdmin === "exclude" && !role.tags?.bot_id)) {
@@ -61,7 +62,7 @@ const AdminRolesElement = ({
     style: {
       paddingTop: 5
     }
-  }, adminRoles.map(m => BdApi.React.createElement(RolePill, {
+  }, adminRoles.map(m => RolePill ? BdApi.React.createElement(RolePill, {
     key: m.id,
     canRemove: false,
     className: "shc-rolePill",
@@ -69,9 +70,28 @@ const AdminRolesElement = ({
     guildId: guild.id,
     onRemove: DiscordConstants.NOOP,
     role: m
+  }) :
+  // Keep admin role visibility even when Discord's pill component is late or renamed.
+  BdApi.React.createElement(FallbackRolePill, {
+    key: m.id,
+    label: m.name
   }))));
 };
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (React.memo(AdminRolesElement));
+function FallbackRolePill({
+  label
+}) {
+  return BdApi.React.createElement("span", {
+    style: {
+      display: "inline-block",
+      marginRight: 6,
+      marginBottom: 6,
+      padding: "4px 8px",
+      borderRadius: 12,
+      backgroundColor: "var(--background-secondary-alt)"
+    }
+  }, label);
+}
 
 /***/ },
 
@@ -102,15 +122,18 @@ function ChannelRolesComponent({
   settings,
   roles
 }) {
+  if (!channel?.permissionOverwrites || !guild?.id || !roles) {
+    return null;
+  }
   const channelRoles = Object.values(channel.permissionOverwrites).filter(role => role !== undefined && role?.type === 0 && (
   //* 1024n = VIEW_CHANNEL permission
   //* 8n = ADMINISTRATOR permission
   //* If role is ADMINISTRATOR it can view channel even if overwrites deny VIEW_CHANNEL
-  settings.showAdmin && (roles[role.id].permissions & BigInt(8)) === BigInt(8) ||
+  settings.showAdmin && (roles[role.id]?.permissions & BigInt(8)) === BigInt(8) ||
   //* If overwrites allow VIEW_CHANNEL (it will override the default role permissions)
   (role.allow & BigInt(1024)) === BigInt(1024) ||
   //* If role can view channel by default and overwrites don't deny VIEW_CHANNEL
-  roles[role.id].permissions & BigInt(1024) && (role.deny & BigInt(1024)) === BigInt(0)));
+  roles[role.id]?.permissions & BigInt(1024) && (role.deny & BigInt(1024)) === BigInt(0)));
   return BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     style: {
@@ -121,7 +144,7 @@ function ChannelRolesComponent({
     style: {
       paddingTop: 8
     }
-  }, !channelRoles?.length && BdApi.React.createElement("span", null, "None"), channelRoles?.length > 0 && channelRoles.map(m => BdApi.React.createElement(RolePill, {
+  }, !channelRoles?.length && BdApi.React.createElement("span", null, "None"), channelRoles?.length > 0 && channelRoles.map(m => RolePill ? BdApi.React.createElement(RolePill, {
     key: m.id,
     canRemove: false,
     className: "shc-rolePill",
@@ -129,7 +152,26 @@ function ChannelRolesComponent({
     guildId: guild.id,
     onRemove: DiscordConstants.NOOP,
     role: roles[m.id]
+  }) :
+  // Keep the permissions panel usable when Discord renames the pill component.
+  BdApi.React.createElement(FallbackRolePill, {
+    key: m.id,
+    label: roles[m.id]?.name ?? m.id
   }))));
+}
+function FallbackRolePill({
+  label
+}) {
+  return BdApi.React.createElement("span", {
+    style: {
+      display: "inline-block",
+      marginRight: 6,
+      marginBottom: 6,
+      padding: "4px 8px",
+      borderRadius: 12,
+      backgroundColor: "var(--background-secondary-alt)"
+    }
+  }, label);
 }
 
 /***/ },
@@ -731,12 +773,15 @@ function UserMentionsComponent({
   const [userMentionComponents, setUserMentionComponents] = React.useState(["Loading..."]);
   const fetchMemberAndMap = async () => {
     setUserMentionComponents(["Loading..."]);
-    if (!settings.showPerms) {
+    if (!settings.showPerms || !channel?.permissionOverwrites || !guild?.id) {
       return setUserMentionComponents(["None"]);
     }
     const allUserOverwrites = Object.values(channel.permissionOverwrites).filter(user => Boolean(user && user?.type === 1));
     for (const user of allUserOverwrites) {
       if (UserStore.getUser(user.id)) continue;
+
+      // Profile lookups are optional; keep rendering known members if this module drifts.
+      if (!ProfileActions?.fetchProfile) break;
       await ProfileActions.fetchProfile(user.id, {
         guildId: guild.id,
         withMutualGuilds: false
@@ -754,12 +799,12 @@ function UserMentionsComponent({
     if (!filteredUserOverwrites?.length) {
       return setUserMentionComponents(["None"]);
     }
-    const mentionArray = filteredUserOverwrites.map(m => UserMentions.react({
+    const mentionArray = filteredUserOverwrites.map(m => UserMentions?.react ? UserMentions.react({
       userId: m.id,
       channelId: channel.id
     }, () => null, {
       noStyleAndInteraction: false
-    }));
+    }) : UserStore.getUser(m.id)?.globalName ?? UserStore.getUser(m.id)?.username ?? m.id);
     return setUserMentionComponents(mentionArray);
   };
   React.useEffect(() => {
@@ -895,6 +940,20 @@ let loaded_successfully = true;
 
 let cachedModules = null;
 
+// These helpers drift often, but SHC already has feature-level fallbacks for them.
+const optionalModules = new Set([
+	"ChannelItemRenderer",
+	"container",
+	"iconItem",
+	"actionIcon",
+	"RolePill",
+	"ChannelUtils",
+	"ProfileActions",
+	"ReadStateStore",
+	"Route",
+	"Voice",
+]);
+
 const {
 	React,
 	ReactDOM,
@@ -915,6 +974,7 @@ const WebpackModules = BdApi.Webpack;
 
 function getModules() {
 	if (cachedModules) return cachedModules;
+	loaded_successfully = true;
 	const DiscordPermissions = WebpackModules.getModule((m) => m.ADD_REACTIONS, {
 		searchExports: true,
 	});
@@ -945,7 +1005,7 @@ function getModules() {
 		},
 	);
 
-	if (!NavigationUtils.transitionTo) {
+	if (!NavigationUtils?.transitionTo) {
 		loaded_successfully = false;
 		Logger.err("Failed to load NavigationUtils", NavigationUtils);
 	}
@@ -1046,8 +1106,7 @@ function getModules() {
 		renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 	});
 	if (!ChannelUtils?.renderTopic) {
-		loaded_successfully = false;
-		Logger.err("Failed to load ChannelUtils", ChannelUtils);
+		Logger.debug("Failed to load ChannelUtils", ChannelUtils);
 	}
 
 	const ProfileActions = WebpackModules.getMangled(
@@ -1059,9 +1118,8 @@ function getModules() {
 		},
 	);
 
-	if (!ProfileActions.fetchProfile) {
-		loaded_successfully = false;
-		Logger.err("Failed to load ProfileActions", ProfileActions);
+	if (!ProfileActions?.fetchProfile) {
+		Logger.debug("Failed to load ProfileActions", ProfileActions);
 	}
 
 	const PermissionUtils = WebpackModules.getMangled(
@@ -1129,17 +1187,25 @@ function getModules() {
 	};
 
 	loaded_successfully = checkVariables(modules);
-	cachedModules = modules;
+	if (loaded_successfully) {
+		cachedModules = modules;
+	}
 	return modules;
 }
 
 function UnloadModules() {
 	cachedModules = null;
+	loaded_successfully = true;
 }
 
 function checkVariables(modules) {
 	for (const variable in modules) {
 		if (!modules[variable]) {
+			if (optionalModules.has(variable)) {
+				Logger.debug(`Optional variable not found: ${variable}`);
+				continue;
+			}
+
 			Logger.err(`Variable not found: ${variable}`);
 		}
 	}
@@ -1155,15 +1221,16 @@ function checkVariables(modules) {
 		return false;
 	}
 
-	if (
-		Object.values(modules).includes(undefined) ||
-		Object.values(modules.Components).includes(undefined)
-	) {
+	const requiredModuleMissing = Object.entries(modules).some(
+		([key, value]) => !optionalModules.has(key) && value === undefined,
+	);
+
+	if (requiredModuleMissing || Object.values(modules.Components).includes(undefined)) {
 		Logger.err("Some modules are undefined.");
 		return false;
 	}
 
-	Logger.info("All variables found.");
+	Logger.info("All required variables found.");
 	return true;
 }
 
@@ -1302,6 +1369,8 @@ const config = {
 			this.api = new BdApi(meta.name);
 
 			this.hiddenChannelCache = {};
+			this.hasRendererHiddenIconPatch = false;
+			this.hiddenIconWaitAbort = null;
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -1419,6 +1488,14 @@ const config = {
 			);
 		}
 
+		shouldDecorateHiddenChannel(channel) {
+			const { DiscordConstants } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
+			return (
+				channel?.isHidden?.() &&
+				channel.type !== DiscordConstants.ChannelTypes.GUILD_CATEGORY
+			);
+		}
+
 		async proceedWithUpdate(SHCContent, version) {
 			const { Logger } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 
@@ -1467,7 +1544,7 @@ const config = {
 				"color: #2f3781; font-weight: bold;",
 			);
 
-			// Wait 1s
+			// Keep the upstream idle delay, but let optional module drift fail soft elsewhere.
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 
 			console.log(
@@ -1481,8 +1558,8 @@ const config = {
 			Logger.isDebugging = this.settings.debugMode;
 
 			this.can =
-				ChannelPermissionStore.can.__originalFunction ??
-				ChannelPermissionStore.can;
+				ChannelPermissionStore?.can?.__originalFunction ??
+				ChannelPermissionStore?.can;
 
 			if (this.settings.checkForUpdates) {
 				this.checkForUpdates();
@@ -1608,53 +1685,53 @@ const config = {
 						type: "warning",
 					},
 				);
-			}
+			} else {
+				Patcher.after(
+					ReadStateStore,
+					"getGuildChannelUnreadState",
+					(_, args, res) => {
+						if (this.settings.MarkUnread) return res;
 
-			Patcher.after(
-				ReadStateStore,
-				"getGuildChannelUnreadState",
-				(_, args, res) => {
+						const [channel] = /** @type {[SHCChannel]} */ (args);
+						return channel?.isHidden()
+							? {
+									mentionCount: 0,
+									unread: false,
+								}
+							: res;
+					},
+				);
+
+				Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
 					if (this.settings.MarkUnread) return res;
 
-					const [channel] = /** @type {[SHCChannel]} */ (args);
-					return channel?.isHidden()
-						? {
-								mentionCount: 0,
-								unread: false,
-							}
-						: res;
-				},
-			);
+					return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				});
 
-			Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
-			});
+					return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				});
 
-			Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
 
-			Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
 
-			Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
+				Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
+					if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
-
-			Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
-				if (this.settings.MarkUnread) return res;
-
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
-			});
+					return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				});
+			}
 
 			//* Make hidden channel visible
 			Patcher.after(ChannelPermissionStore, "can", (_, args, res) => {
@@ -1684,30 +1761,28 @@ const config = {
 						type: "warning",
 					},
 				);
+			} else {
+				Patcher.after(Route, "A", (_, _args, res) => {
+					const channelId = res.props?.computedMatch?.params?.channelId;
+					const guildId = res.props?.computedMatch?.params?.guildId;
+					const channel = ChannelStore?.getChannel(channelId);
+
+					if (
+						guildId &&
+						channel?.isHidden?.() &&
+						channel?.id !== Voice.getChannelId()
+					) {
+						res.props.render = () =>
+							React.createElement(Lockscreen, {
+								chat,
+								channel,
+								settings: this.settings,
+							});
+					}
+
+					return res;
+				});
 			}
-
-			Patcher.after(Route, "A", (_, _args, res) => {
-				if (!Voice || !Route) return res;
-
-				const channelId = res.props?.computedMatch?.params?.channelId;
-				const guildId = res.props?.computedMatch?.params?.guildId;
-				const channel = ChannelStore?.getChannel(channelId);
-
-				if (
-					guildId &&
-					channel?.isHidden?.() &&
-					channel?.id !== Voice.getChannelId()
-				) {
-					res.props.render = () =>
-						React.createElement(Lockscreen, {
-							chat,
-							channel,
-							settings: this.settings,
-						});
-				}
-
-				return res;
-			});
 
 			//* Stop fetching messages if the channel is hidden
 			if (!MessageActions?.fetchMessages) {
@@ -1717,105 +1792,38 @@ const config = {
 						type: "warning",
 					},
 				);
+			} else {
+				Patcher.instead(
+					MessageActions,
+					"fetchMessages",
+					(instance, args, res) => {
+						const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
+						if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
+							return;
+						}
+
+						return res.call(instance, fetchConfig);
+					},
+				);
 			}
 
-			Patcher.instead(
-				MessageActions,
-				"fetchMessages",
-				(instance, args, res) => {
-					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
-					if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
-						return;
-					}
-
-					return res.call(instance, fetchConfig);
-				},
-			);
-
 			if (this.settings.hiddenChannelIcon) {
-				if (!ChannelItemRenderer) {
-					this.api.UI.showToast(
-						"(SHC) ChannelItemRenderer module is missing, channel lock icon won't be shown.",
-						{
-							type: "warning",
-						},
-					);
+				if (!ChannelItemRenderer || !iconItem || !actionIcon) {
+					// Stay on the original renderer-based path by waiting for Discord to register the row icon modules.
+					this.waitForHiddenChannelRenderer();
+				} else {
+					this.patchHiddenChannelRenderer({
+						Patcher,
+						Utilities,
+						React,
+						HiddenChannelIcon,
+						NavigationUtils,
+						DiscordConstants,
+						ChannelItemRenderer,
+						iconItem,
+						actionIcon,
+					});
 				}
-
-				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
-					const [instance] =
-						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!instance?.channel?.isHidden()) {
-						return res;
-					}
-
-					const item = res?.props?.children?.props;
-					if (item?.className) {
-						item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
-					}
-
-					const children = Utilities.findInTree(
-						res,
-						(m) =>
-							m?.props?.onClick?.toString().includes("stopPropagation") &&
-							m.type === "div",
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (children.props?.children) {
-						children.props.children = [
-							React.createElement(HiddenChannelIcon, {
-								icon: this.settings.hiddenChannelIcon,
-								iconItem: iconItem,
-								actionIcon: actionIcon,
-							}),
-						];
-					}
-
-					const isInCallInThisChannel =
-						instance.channel.type ===
-							DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
-					if (!isInCallInThisChannel) {
-						return res;
-					}
-
-					const wrapper = Utilities.findInTree(
-						res,
-						(channel) =>
-							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (!wrapper) {
-						return res;
-					}
-
-					wrapper.props.onMouseDown = () => {};
-					wrapper.props.onMouseUp = () => {};
-
-					const mainContent = wrapper?.props?.children[1]?.props?.children;
-
-					if (!mainContent) {
-						return res;
-					}
-
-					mainContent.props.onClick = () => {
-						if (instance.channel?.isGuildVocal()) {
-							NavigationUtils.transitionTo(
-								`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
-							);
-						}
-					};
-					mainContent.props.href = null;
-
-					return res;
-				});
 			}
 
 			//* Remove lock icon from hidden voice channels
@@ -2180,7 +2188,177 @@ const config = {
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
 
-			this.forceUpdate(document.querySelector(`.${container}`));
+			this.forceUpdate(this.findChannelTreeContainer(container));
+		}
+
+		waitForHiddenChannelRenderer() {
+			if (this.hiddenIconWaitAbort || this.hasRendererHiddenIconPatch) {
+				return;
+			}
+
+			this.hiddenIconWaitAbort = new AbortController();
+			const signal = this.hiddenIconWaitAbort.signal;
+			const moduleLoader = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
+			const rendererReady = BdApi.Webpack.waitForModule(
+				(m) => m?.render?.toString?.().includes(".ALL_MESSAGES"),
+				{ signal },
+			);
+			const iconClassesReady = BdApi.Webpack.waitForModule(
+				(m) => m?.iconItem && m?.actionIcon,
+				{ signal },
+			);
+
+			Promise.all([rendererReady, iconClassesReady])
+				.then(() => {
+					if (signal.aborted || this.hasRendererHiddenIconPatch) {
+						return;
+					}
+
+					moduleLoader.UnloadModules();
+					const modules = moduleLoader.getModules();
+					const { HiddenChannelIcon } = __webpack_require__(/*! ./components/HiddenChannelIcon */ "./src/components/HiddenChannelIcon.jsx");
+
+					if (
+						!modules.ChannelItemRenderer ||
+						!modules.iconItem ||
+						!modules.actionIcon
+					) {
+						return;
+					}
+
+					this.patchHiddenChannelRenderer({
+						Patcher: this.api.Patcher,
+						Utilities: modules.Utilities,
+						React: modules.React,
+						HiddenChannelIcon,
+						NavigationUtils: modules.NavigationUtils,
+						DiscordConstants: modules.DiscordConstants,
+						ChannelItemRenderer: modules.ChannelItemRenderer,
+						iconItem: modules.iconItem,
+						actionIcon: modules.actionIcon,
+					});
+					this.rerenderChannels();
+				})
+				.catch((error) => {
+					if (error?.name !== "AbortError") {
+						console.error(error);
+					}
+				})
+				.finally(() => {
+					if (this.hiddenIconWaitAbort?.signal === signal) {
+						this.hiddenIconWaitAbort = null;
+					}
+				});
+		}
+
+		patchHiddenChannelRenderer({
+			Patcher,
+			Utilities,
+			React,
+			HiddenChannelIcon,
+			NavigationUtils,
+			DiscordConstants,
+			ChannelItemRenderer,
+			iconItem,
+			actionIcon,
+		}) {
+			if (this.hasRendererHiddenIconPatch) {
+				return;
+			}
+
+			this.hasRendererHiddenIconPatch = true;
+
+			Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
+				const [instance] =
+					/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
+				if (!this.shouldDecorateHiddenChannel(instance?.channel)) {
+					return res;
+				}
+
+				const item = res?.props?.children?.props;
+				if (item?.className) {
+					item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
+				}
+
+				const children = Utilities.findInTree(
+					res,
+					(m) =>
+						m?.props?.onClick?.toString().includes("stopPropagation") &&
+						m.type === "div",
+					{
+						walkable: ["props", "children", "child", "sibling"],
+						maxRecursion: 100,
+					},
+				);
+
+				if (children?.props?.children) {
+					children.props.children = [
+						React.createElement(HiddenChannelIcon, {
+							icon: this.settings.hiddenChannelIcon,
+							iconItem: iconItem,
+							actionIcon: actionIcon,
+						}),
+					];
+				}
+
+				const isInCallInThisChannel =
+					instance.channel.type ===
+						DiscordConstants.ChannelTypes.GUILD_VOICE &&
+					!instance.connected;
+				if (!isInCallInThisChannel) {
+					return res;
+				}
+
+				const wrapper = Utilities.findInTree(
+					res,
+					(channel) =>
+						channel?.props?.className?.includes("shc-hidden-channel-type-2"),
+					{
+						walkable: ["props", "children", "child", "sibling"],
+						maxRecursion: 100,
+					},
+				);
+
+				if (!wrapper) {
+					return res;
+				}
+
+				wrapper.props.onMouseDown = () => {};
+				wrapper.props.onMouseUp = () => {};
+
+				const mainContent = wrapper?.props?.children[1]?.props?.children;
+
+				if (!mainContent) {
+					return res;
+				}
+
+				mainContent.props.onClick = () => {
+					if (instance.channel?.isGuildVocal()) {
+						NavigationUtils.transitionTo(
+							`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
+						);
+					}
+				};
+				mainContent.props.href = null;
+
+				return res;
+			});
+		}
+
+		findChannelTreeContainer(container) {
+			const channelTree =
+				container && document.querySelector(`.${container}`);
+			if (channelTree) {
+				return channelTree;
+			}
+
+			// Discord's container class changes often, so fall back to the channel list itself.
+			return (
+				document.querySelector('[data-list-id="channels"]') ||
+				document
+					.querySelector('[data-list-item-id^="channels___"]')
+					?.closest?.('[class]')
+			);
 		}
 
 		/**
@@ -2194,6 +2372,7 @@ const config = {
 			const { ReactTools } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 
 			const toForceUpdate = ReactTools.getOwnerInstance(element);
+			if (!toForceUpdate) return;
 			const forceRerender = this.api.Patcher.instead(
 				toForceUpdate,
 				"render",
@@ -2211,6 +2390,9 @@ const config = {
 			const { UnloadModules } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
 			this.api.Patcher.unpatchAll();
+			this.hiddenIconWaitAbort?.abort();
+			this.hiddenIconWaitAbort = null;
+			this.hasRendererHiddenIconPatch = false;
 			DOMTools.removeStyle(config.info.name);
 			ContextMenu?.unpatch("guild-context", this.processContextMenu);
 			this.rerenderChannels();
