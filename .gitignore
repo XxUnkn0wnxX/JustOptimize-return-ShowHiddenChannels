@@ -1,3 +1,6 @@
 node_modules
 /dist
 .fuse_hidden*
+tmp/
+AGENTS.md
+.venv/

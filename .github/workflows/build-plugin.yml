@@ -1,0 +1,79 @@
+name: Build Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-plugin.yml"
+      - "src/**"
+      - "bun.lock"
+      - "package.json"
+      - "webpack.config.js"
+      - "jsconfig.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Prepare BetterDiscord build target
+        run: |
+          export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+          mkdir -p "$XDG_CONFIG_HOME/BetterDiscord/plugins"
+          echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build plugin
+        run: bun run build
+
+      - name: Replace distributable in repo root
+        run: cp dist/ShowHiddenChannels.plugin.js ShowHiddenChannels.plugin.js
+
+      - name: Commit updated plugin
+        run: |
+          if git diff --quiet -- ShowHiddenChannels.plugin.js; then
+            echo "No distributable changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ShowHiddenChannels.plugin.js
+          git commit -m "Build plugin"
+          git push origin main
+
+      - name: Refresh rolling fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="Nightly-Fork"
+          FULL_SHA="$(git rev-parse HEAD)"
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
+          git push origin ":refs/tags/$TAG" || true
+
+          gh release create "$TAG" ShowHiddenChannels.plugin.js \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$FULL_SHA" \
+            --title "Nightly-Fork" \
+            --notes "Auto-built from commit $FULL_SHA." \
+            --latest
