@@ -67,6 +67,23 @@ export default (() => {
 			);
 		}
 
+		semverGt(a, b) {
+			const parse = (v) => {
+				const [base, pre] = v.split("-pre");
+				return { parts: base.split(".").map(Number), pre: pre !== undefined ? Number(pre) : null };
+			};
+			const av = parse(a);
+			const bv = parse(b);
+			for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
+				const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
+				if (diff !== 0) return diff > 0;
+			}
+			// stable > pre-release; higher pre number wins between two pre-releases
+			if (av.pre === null && bv.pre !== null) return true;
+			if (av.pre !== null && bv.pre === null) return false;
+			return av.pre !== null && av.pre > bv.pre;
+		}
+
 		async checkForUpdates() {
 			const { Logger } = require("./utils/modules");
 
@@ -101,9 +118,20 @@ export default (() => {
 				m.assets.some((n) => n.name === config.main),
 			);
 
-			const latestRelease = this.settings.usePreRelease
-				? releases[0]?.tag_name?.replace("v", "")
-				: releases.find((m) => !m.prerelease)?.tag_name?.replace("v", "");
+			const latestStable = releases
+				.find((m) => !m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestPreRelease = releases
+				.find((m) => m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestRelease =
+				this.settings.usePreRelease && latestPreRelease && latestStable
+					? this.semverGt(latestPreRelease, latestStable)
+						? latestPreRelease
+						: latestStable
+					: this.settings.usePreRelease && latestPreRelease
+						? latestPreRelease
+						: latestStable;
 
 			Logger.debug(
 				`Latest version: ${latestRelease}, pre-release: ${!!this.settings.usePreRelease}`,
@@ -118,28 +146,7 @@ export default (() => {
 				return Logger.err("Failed to check for updates, version not found.");
 			}
 
-			const semverGt = (a, b) => {
-				const parse = (v) => {
-					const [base, pre] = v.split("-pre");
-					return {
-						parts: base.split(".").map(Number),
-						pre: pre !== undefined ? Number(pre) : null,
-					};
-				};
-				const av = parse(a);
-				const bv = parse(b);
-				for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
-					const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
-					if (diff !== 0) return diff > 0;
-				}
-				// base versions equal — no pre > pre, higher pre number wins
-				if (av.pre === null && bv.pre !== null) return true;
-				if (av.pre !== null && bv.pre === null) return false;
-				if (av.pre !== null && bv.pre !== null) return av.pre > bv.pre;
-				return false;
-			};
-
-			if (!semverGt(latestRelease, config.info.version)) {
+			if (!this.semverGt(latestRelease, config.info.version)) {
 				return Logger.info("No updates found.");
 			}
 
