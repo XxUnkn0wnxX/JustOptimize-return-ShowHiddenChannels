@@ -69,8 +69,28 @@ export default (() => {
 			);
 		}
 
+		semverGt(a, b) {
+			const parse = (v) => {
+				const [base, pre] = v.split("-pre");
+				return {
+					parts: base.split(".").map(Number),
+					pre: pre !== undefined ? Number(pre) : null,
+				};
+			};
+			const av = parse(a);
+			const bv = parse(b);
+			for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
+				const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
+				if (diff !== 0) return diff > 0;
+			}
+			// stable > pre-release; higher pre number wins between two pre-releases
+			if (av.pre === null && bv.pre !== null) return true;
+			if (av.pre !== null && bv.pre === null) return false;
+			return av.pre !== null && av.pre > bv.pre;
+		}
+
 		async checkForUpdates() {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			Logger.debug(
 				`Checking for updates, current version: ${config.info.version}`,
@@ -103,9 +123,20 @@ export default (() => {
 				m.assets.some((n) => n.name === config.main),
 			);
 
-			const latestRelease = this.settings.usePreRelease
-				? releases[0]?.tag_name?.replace("v", "")
-				: releases.find((m) => !m.prerelease)?.tag_name?.replace("v", "");
+			const latestStable = releases
+				.find((m) => !m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestPreRelease = releases
+				.find((m) => m.prerelease)
+				?.tag_name?.replace("v", "");
+			const latestRelease =
+				this.settings.usePreRelease && latestPreRelease && latestStable
+					? this.semverGt(latestPreRelease, latestStable)
+						? latestPreRelease
+						: latestStable
+					: this.settings.usePreRelease && latestPreRelease
+						? latestPreRelease
+						: latestStable;
 
 			Logger.debug(
 				`Latest version: ${latestRelease}, pre-release: ${!!this.settings.usePreRelease}`,
@@ -120,28 +151,7 @@ export default (() => {
 				return Logger.err("Failed to check for updates, version not found.");
 			}
 
-			const semverGt = (a, b) => {
-				const parse = (v) => {
-					const [base, pre] = v.split("-pre");
-					return {
-						parts: base.split(".").map(Number),
-						pre: pre !== undefined ? Number(pre) : null,
-					};
-				};
-				const av = parse(a);
-				const bv = parse(b);
-				for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
-					const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
-					if (diff !== 0) return diff > 0;
-				}
-				// base versions equal — no pre > pre, higher pre number wins
-				if (av.pre === null && bv.pre !== null) return true;
-				if (av.pre !== null && bv.pre === null) return false;
-				if (av.pre !== null && bv.pre !== null) return av.pre > bv.pre;
-				return false;
-			};
-
-			if (!semverGt(latestRelease, config.info.version)) {
+			if (!this.semverGt(latestRelease, config.info.version)) {
 				return Logger.info("No updates found.");
 			}
 
@@ -185,7 +195,7 @@ export default (() => {
 		}
 
 		async proceedWithUpdate(SHCContent, version) {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			Logger.debug(
 				`Update confirmed by the user, updating to version ${version}`,
@@ -227,31 +237,43 @@ export default (() => {
 		}
 
 		async start() {
-			console.log(
-				`%c[${config.info.name}] Starting plugin...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			const { Logger } = require("./utils/modules");
 
-			// Keep the upstream idle delay, but let optional module drift fail soft elsewhere.
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			Logger.info(`Starting plugin...`);
 
-			console.log(
-				`%c[${config.info.name}] Checking for updates...`,
-				"color: #2f3781; font-weight: bold;",
-			);
+			await new Promise((resolve) => {
+				const start = Date.now();
+				const interval = setInterval(() => {
+					const container = BdApi.Webpack.getByKeys(
+						"container",
+						"hubContainer",
+					)?.container;
+					if (container) {
+						clearInterval(interval);
+						resolve();
+					} else if (Date.now() - start >= 10000) {
+						clearInterval(interval);
+						Logger.error("Timed out waiting for container module after 10s");
+						resolve();
+					}
+				}, 500);
+			});
 
-			const { Logger, ChannelPermissionStore } =
-				require("./utils/modules").getModules();
+			Logger.info(`Checking for updates...`);
 
 			Logger.isDebugging = this.settings.debugMode;
+
+			if (this.settings.checkForUpdates) {
+				await this.checkForUpdates();
+			}
+
+			// First call to the modules loader
+			const { ChannelPermissionStore } =
+				require("./utils/modules").getModules();
 
 			this.can =
 				ChannelPermissionStore?.can?.__originalFunction ??
 				ChannelPermissionStore?.can;
-
-			if (this.settings.checkForUpdates) {
-				this.checkForUpdates();
-			}
 
 			const { loaded_successfully } = require("./utils/modules");
 
@@ -259,7 +281,7 @@ export default (() => {
 				this.doStart();
 			} else {
 				this.api.UI.showConfirmationModal(
-					"(SHC) Broken Modules",
+					`(SHC v${config.info.version}) Broken Modules`,
 					"ShowHiddenChannels has detected that some modules are broken, would you like to start anyway? (This might break the plugin or Discord itself)",
 					{
 						confirmText: "Start anyway",
@@ -870,8 +892,11 @@ export default (() => {
 		}
 
 		rerenderChannels() {
-			const { container, PermissionStoreActionHandler, ChannelListStoreActionHandler } =
-				require("./utils/modules").getModules();
+			const {
+				container,
+				PermissionStoreActionHandler,
+				ChannelListStoreActionHandler,
+			} = require("./utils/modules").getModules();
 
 			PermissionStoreActionHandler?.CONNECTION_OPEN();
 			ChannelListStoreActionHandler?.CONNECTION_OPEN();
@@ -1117,7 +1142,7 @@ export default (() => {
 		}
 
 		saveSettings() {
-			const { Logger } = require("./utils/modules").getModules();
+			const { Logger } = require("./utils/modules");
 
 			this.api.Data.save("settings", this.settings);
 			Logger.debug("Settings saved.", this.settings);
