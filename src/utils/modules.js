@@ -38,20 +38,6 @@ export let loaded_successfully = true;
 
 let cachedModules = null;
 
-// These helpers drift often, but SHC already has feature-level fallbacks for them.
-const optionalModules = new Set([
-	"ChannelItemRenderer",
-	"container",
-	"iconItem",
-	"actionIcon",
-	"RolePill",
-	"ChannelUtils",
-	"ProfileActions",
-	"ReadStateStore",
-	"Route",
-	"Voice",
-]);
-
 const {
 	React,
 	ReactDOM,
@@ -204,7 +190,8 @@ export function getModules() {
 		renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 	});
 	if (!ChannelUtils?.renderTopic) {
-		Logger.debug("Failed to load ChannelUtils", ChannelUtils);
+		loaded_successfully = false;
+		Logger.err("Failed to load ChannelUtils", ChannelUtils);
 	}
 
 	const ProfileActions = WebpackModules.getMangled(
@@ -216,8 +203,9 @@ export function getModules() {
 		},
 	);
 
-	if (!ProfileActions?.fetchProfile) {
-		Logger.debug("Failed to load ProfileActions", ProfileActions);
+	if (!ProfileActions.fetchProfile) {
+		loaded_successfully = false;
+		Logger.err("Failed to load ProfileActions", ProfileActions);
 	}
 
 	const PermissionUtils = WebpackModules.getMangled(
@@ -285,25 +273,17 @@ export function getModules() {
 	};
 
 	loaded_successfully = checkVariables(modules);
-	if (loaded_successfully) {
-		cachedModules = modules;
-	}
+	cachedModules = modules;
 	return modules;
 }
 
 export function UnloadModules() {
 	cachedModules = null;
-	loaded_successfully = true;
 }
 
 function checkVariables(modules) {
 	for (const variable in modules) {
 		if (!modules[variable]) {
-			if (optionalModules.has(variable)) {
-				Logger.debug(`Optional variable not found: ${variable}`);
-				continue;
-			}
-
 			Logger.err(`Variable not found: ${variable}`);
 		}
 	}
@@ -319,15 +299,14 @@ function checkVariables(modules) {
 		return false;
 	}
 
-	const requiredModuleMissing = Object.entries(modules).some(
-		([key, value]) => !optionalModules.has(key) && value === undefined,
-	);
-
-	if (requiredModuleMissing || Object.values(modules.Components).includes(undefined)) {
+	if (
+		Object.values(modules).includes(undefined) ||
+		Object.values(modules.Components).includes(undefined)
+	) {
 		Logger.err("Some modules are undefined.");
 		return false;
 	}
 
-	Logger.info("All required variables found.");
+	Logger.info("All variables found.");
 	return true;
 }

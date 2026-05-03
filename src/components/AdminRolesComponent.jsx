@@ -12,7 +12,6 @@ const {
 const AdminRolesElement = ({ guild, settings, roles }) => {
 	if (!settings.showAdmin) return null;
 	if (settings.showAdmin === "channel") return null;
-	if (!guild?.id || !roles) return null;
 
 	const adminRoles = [];
 	for (const role of Object.values(roles)) {
@@ -44,20 +43,15 @@ const AdminRolesElement = ({ guild, settings, roles }) => {
 				}}
 			>
 				{adminRoles.map((m) => (
-					RolePill ? (
-						<RolePill
-							key={m.id}
-							canRemove={false}
-							className={"shc-rolePill"}
-							disableBorderColor={true}
-							guildId={guild.id}
-							onRemove={DiscordConstants.NOOP}
-							role={m}
-						/>
-					) : (
-						// Keep admin role visibility even when Discord's pill component is late or renamed.
-						<FallbackRolePill key={m.id} label={m.name} />
-					)
+					<RolePill
+						key={m.id}
+						canRemove={false}
+						className={"shc-rolePill"}
+						disableBorderColor={true}
+						guildId={guild.id}
+						onRemove={DiscordConstants.NOOP}
+						role={m}
+					/>
 				))}
 			</div>
 		</TextElement>
@@ -65,20 +59,3 @@ const AdminRolesElement = ({ guild, settings, roles }) => {
 };
 
 export default React.memo(AdminRolesElement);
-
-function FallbackRolePill({ label }) {
-	return (
-		<span
-			style={{
-				display: "inline-block",
-				marginRight: 6,
-				marginBottom: 6,
-				padding: "4px 8px",
-				borderRadius: 12,
-				backgroundColor: "var(--background-secondary-alt)",
-			}}
-		>
-			{label}
-		</span>
-	);
-}
