@@ -383,7 +383,7 @@ export default (() => {
 				}
 
 				Logger.info(
-					`Private channel hiding experiment forced to Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}). Restart Discord if channel names were already cached as No Access.`,
+					`Private channel hiding experiment forced to Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}). Restart Discord and delete Cache and Code Cache if channel names were already cached as No Access.`,
 				);
 			}, 500);
 		}
