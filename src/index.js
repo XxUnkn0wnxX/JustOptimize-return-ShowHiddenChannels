@@ -25,6 +25,9 @@ const config = {
 export default (() => {
 	// biome-ignore lint/security/noGlobalEval: This is a necessary evil
 	const RuntimeRequire = eval("require");
+	const PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID =
+		"2026-02-private-channel-hiding";
+	const PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT = -1;
 
 	const defaultSettings = {
 		hiddenChannelIcon: "lock",
@@ -57,6 +60,7 @@ export default (() => {
 			this.api = new BdApi(meta.name);
 
 			this.hiddenChannelCache = {};
+			this.privateChannelHidingHotfixWarnings = new Set();
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -230,6 +234,7 @@ export default (() => {
 			const { Logger } = require("./utils/modules");
 
 			Logger.info(`Starting plugin...`);
+			Logger.isDebugging = this.settings.debugMode;
 
 			await new Promise((resolve) => {
 				const start = Date.now();
@@ -250,8 +255,6 @@ export default (() => {
 			});
 
 			Logger.info(`Checking for updates...`);
-
-			Logger.isDebugging = this.settings.debugMode;
 
 			if (this.settings.checkForUpdates) {
 				await this.checkForUpdates();
@@ -303,9 +306,140 @@ export default (() => {
 				this.api.Data.save("version", config.info.version);
 			}
 
+			this.applyPrivateChannelHidingExperimentHotfix();
 			DOMTools.addStyle(config.info.name, styles);
 			this.Patch();
 			this.rerenderChannels();
+		}
+
+		/**
+		 * Temporary hotfix for Discord's 2026-02-private-channel-hiding experiment.
+		 * Keep this isolated so it can be removed once SHC has a better long-term path.
+		 */
+		applyPrivateChannelHidingExperimentHotfix() {
+			const { Logger } = require("./utils/modules");
+			const experimentStore = this.getPrivateChannelHidingExperimentStore();
+			const currentVariant = this.getPrivateChannelHidingVariant(experimentStore);
+
+			if (!experimentStore || typeof currentVariant !== "number") {
+				this.warnPrivateChannelHidingHotfixOnce(
+					"experiment-not-found",
+					`Experiment ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
+				);
+				return;
+			}
+
+			if (currentVariant === PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT) {
+				Logger.info(
+					`Private channel hiding experiment already reads Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}); refreshing visible override.`,
+				);
+			}
+
+			const dispatcher = this.getDiscordDispatcher();
+			if (typeof dispatcher?.dispatch !== "function") {
+				this.warnPrivateChannelHidingHotfixOnce(
+					"dispatcher-not-found",
+					"Discord dispatcher not found; private-channel-hiding hotfix was not applied.",
+				);
+				return;
+			}
+
+			const hasApexOverrideHandler = this.getDispatcherNodes().some(
+				(node) =>
+					node?.name === "ApexExperimentStore" &&
+					typeof node?.actionHandler?.APEX_EXPERIMENT_OVERRIDE_CREATE ===
+						"function",
+			);
+
+			if (!hasApexOverrideHandler) {
+				this.warnPrivateChannelHidingHotfixOnce(
+					"not-eligible-action-not-found",
+					`Not Eligible override action for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
+				);
+				return;
+			}
+
+			dispatcher.dispatch({
+				type: "APEX_EXPERIMENT_OVERRIDE_CREATE",
+				experimentName: PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
+				variantId: PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT,
+			});
+			Logger.info(
+				`Private channel hiding experiment override dispatched as Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}).`,
+			);
+
+			window.setTimeout(() => {
+				const nextVariant =
+					this.getPrivateChannelHidingVariant(experimentStore);
+
+				if (
+					nextVariant !== PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT
+				) {
+					this.warnPrivateChannelHidingHotfixOnce(
+						"not-eligible-not-applied",
+						`Not Eligible option for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} did not apply; current variant is ${String(nextVariant)}.`,
+					);
+					return;
+				}
+
+				Logger.info(
+					`Private channel hiding experiment forced to Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}). Restart Discord if channel names were already cached as No Access.`,
+				);
+			}, 500);
+		}
+
+		getPrivateChannelHidingExperimentStore() {
+			const Webpack = BdApi?.Webpack;
+			const candidates = [
+				Webpack?.getStore?.("ExperimentStore"),
+				Webpack?.getByKeys?.(
+					"getUserExperimentBucket",
+					"getUserExperimentDescriptor",
+				),
+				...this.getDispatcherNodes()
+					.filter((node) => node?.name === "ExperimentStore")
+					.map((node) => node?.store ?? node),
+			];
+
+			return candidates.find(
+				(candidate) =>
+					candidate && typeof candidate.getUserExperimentBucket === "function",
+			);
+		}
+
+		getPrivateChannelHidingVariant(experimentStore) {
+			try {
+				return experimentStore?.getUserExperimentBucket?.(
+					PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
+				);
+			} catch {
+				return undefined;
+			}
+		}
+
+		getDiscordDispatcher() {
+			const Webpack = BdApi?.Webpack;
+			return (
+				Webpack?.getStore?.("UserStore")?._dispatcher ||
+				Webpack?.getByKeys?.("dispatch", "subscribe", "unsubscribe", {
+					searchExports: true,
+				})
+			);
+		}
+
+		getDispatcherNodes() {
+			const nodes =
+				this.getDiscordDispatcher()?._actionHandlers?._dependencyGraph?.nodes;
+
+			if (!nodes) return [];
+			return Array.isArray(nodes) ? nodes : Object.values(nodes);
+		}
+
+		warnPrivateChannelHidingHotfixOnce(key, message) {
+			if (this.privateChannelHidingHotfixWarnings.has(key)) return;
+
+			this.privateChannelHidingHotfixWarnings.add(key);
+			require("./utils/modules").Logger.warn(message);
 		}
 
 		Patch() {
