@@ -61,6 +61,7 @@ export default (() => {
 
 			this.hiddenChannelCache = {};
 			this.privateChannelHidingHotfixWarnings = new Set();
+			this.channelIconPatchWarnings = new Set();
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -442,6 +443,16 @@ export default (() => {
 			require("./utils/modules").Logger.warn(message);
 		}
 
+		warnChannelIconPatchOnce(key, message, details) {
+			if (this.channelIconPatchWarnings.has(key)) return;
+
+			this.channelIconPatchWarnings.add(key);
+			require("./utils/modules").Logger.warn(message, details);
+			this.api.UI.showToast(`(SHC) ${message}`, {
+				type: "warning",
+			});
+		}
+
 		Patch() {
 			const { Lockscreen } = require("./components/Lockscreen");
 			const { HiddenChannelIcon } = require("./components/HiddenChannelIcon");
@@ -451,7 +462,7 @@ export default (() => {
 				/* Library */
 				Utilities,
 				// DOMTools,
-				// Logger,
+				Logger,
 				// ReactTools,
 
 				/* Discord Modules (From lib) */
@@ -469,7 +480,8 @@ export default (() => {
 				chat,
 				Route,
 				ChannelItemRenderer,
-				ChannelItemUtils,
+				VoiceLimitedIcon,
+				ChannelItemIcon,
 				ChannelPermissionStore,
 				// PermissionStoreActionHandler,
 				// ChannelListStoreActionHandler,
@@ -729,24 +741,82 @@ export default (() => {
 				});
 			}
 
-			//* Remove lock icon from hidden voice channels
-			if (!ChannelItemUtils?.icon) {
-				this.api.UI.showToast(
-					"(SHC) ChannelItemUtils is missing, voice channel lock icon won't be removed.",
-					{
-						type: "warning",
-					},
+			//* Use Discord's native combined voice + small lock icon
+			if (!VoiceLimitedIcon) {
+				this.warnChannelIconPatchOnce(
+					"voice-limited-icon-component-missing",
+					"Discord's native Voice (Limited) icon was not found; hidden voice channels cannot show the normal voice icon with a lock badge.",
+					{ VoiceLimitedIcon },
+				);
+			}
+
+			if (!ChannelItemIcon?.type) {
+				this.warnChannelIconPatchOnce(
+					"channel-item-icon-component-missing",
+					"Discord's channel icon component was not found; hidden voice channels cannot use the native Voice (Limited) icon.",
+					{ ChannelItemIcon },
 				);
 			} else {
-				Patcher.before(ChannelItemUtils, "icon", (_, args) => {
-					const [channel, , opts] =
-						/** @type {[SHCChannel, any, {locked: boolean}]} */ (args);
-					if (!opts) return;
+				try {
+					Patcher.after(ChannelItemIcon, "type", (_, args, res) => {
+						const [props] =
+							/** @type {[{
+								channel: SHCChannel,
+								locked: boolean
+							}]} */ (args);
+						const channel = props?.channel;
 
-					if (channel?.isHidden?.() && opts.locked) {
-						opts.locked = false;
-					}
-				});
+						if (
+							!props?.locked ||
+							!channel?.isHidden?.() ||
+							!channel?.isGuildVoice?.() ||
+							!VoiceLimitedIcon
+						) {
+							return res;
+						}
+
+						const iconContainer = res?.props?.children;
+						if (!iconContainer?.props?.children) {
+							this.warnChannelIconPatchOnce(
+								"channel-item-icon-render-shape-changed",
+								"Discord's channel icon render shape changed; hidden voice channels cannot use the native Voice (Limited) icon.",
+								{ result: res },
+							);
+							return res;
+						}
+
+						const currentIcon = iconContainer.props.children;
+						iconContainer.props.children = React.createElement(
+							VoiceLimitedIcon,
+							{
+								...currentIcon.props,
+								className: currentIcon.props?.className,
+								color: "currentColor",
+								size: "md",
+							},
+						);
+
+						if (res.props.text === "Voice (Locked)") {
+							res.props.text = "Voice (Limited)";
+						}
+						if (iconContainer.props["aria-label"] === "Voice (Locked) icon") {
+							iconContainer.props["aria-label"] = "Voice (Limited) icon";
+						}
+
+						return res;
+					});
+				} catch (error) {
+					Logger.err(
+						"Found Discord's channel icon component, but failed to patch it with the native Voice (Limited) icon.",
+						error,
+					);
+					this.api.UI.showToast(
+						"(SHC) Discord's channel icon component was found but could not be patched with the native Voice (Limited) icon.",
+						{
+							type: "warning",
+						},
+					);
+				}
 			}
 
 			//* Manually collapse hidden channel category

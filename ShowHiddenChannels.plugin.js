@@ -988,11 +988,22 @@ function getModules() {
 		m.render?.toString().includes(".ALL_MESSAGES"),
 	);
 
-	const ChannelItemUtils = WebpackModules.getMangled(
-		/hasActiveThreads:[a-zA-Z]+=!1,/,
-		{
-			icon: WebpackModules.Filters.byRegex(/hasActiveThreads:[a-zA-Z]+=!1,/),
-		},
+	const VoiceLimitedIcon = WebpackModules.getModule(
+		WebpackModules.Filters.byStrings(
+			"M16 4h.5v-.5",
+			"M20.5 12c-.28 0-.5.22-.52.5",
+		),
+		{ searchExports: true },
+	);
+
+	const ChannelItemIcon = WebpackModules.getModule(
+		(module) =>
+			module?.type &&
+			WebpackModules.Filters.byStrings(
+				"hasUsersInVoiceChannel",
+				"enableWaveformIcon",
+			)(module.type),
+		{ searchExports: true },
 	);
 
 	const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
@@ -1114,7 +1125,8 @@ function getModules() {
 		chat,
 		Route,
 		ChannelItemRenderer,
-		ChannelItemUtils,
+		VoiceLimitedIcon,
+		ChannelItemIcon,
 		ChannelPermissionStore,
 		PermissionStoreActionHandler,
 		ChannelListStoreActionHandler,
@@ -1312,6 +1324,7 @@ const config = {
 
 			this.hiddenChannelCache = {};
 			this.privateChannelHidingHotfixWarnings = new Set();
+			this.channelIconPatchWarnings = new Set();
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -1693,6 +1706,16 @@ const config = {
 			(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(message);
 		}
 
+		warnChannelIconPatchOnce(key, message, details) {
+			if (this.channelIconPatchWarnings.has(key)) return;
+
+			this.channelIconPatchWarnings.add(key);
+			(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(message, details);
+			this.api.UI.showToast(`(SHC) ${message}`, {
+				type: "warning",
+			});
+		}
+
 		Patch() {
 			const { Lockscreen } = __webpack_require__(/*! ./components/Lockscreen */ "./src/components/Lockscreen.jsx");
 			const { HiddenChannelIcon } = __webpack_require__(/*! ./components/HiddenChannelIcon */ "./src/components/HiddenChannelIcon.jsx");
@@ -1702,7 +1725,7 @@ const config = {
 				/* Library */
 				Utilities,
 				// DOMTools,
-				// Logger,
+				Logger,
 				// ReactTools,
 
 				/* Discord Modules (From lib) */
@@ -1720,7 +1743,8 @@ const config = {
 				chat,
 				Route,
 				ChannelItemRenderer,
-				ChannelItemUtils,
+				VoiceLimitedIcon,
+				ChannelItemIcon,
 				ChannelPermissionStore,
 				// PermissionStoreActionHandler,
 				// ChannelListStoreActionHandler,
@@ -1980,24 +2004,82 @@ const config = {
 				});
 			}
 
-			//* Remove lock icon from hidden voice channels
-			if (!ChannelItemUtils?.icon) {
-				this.api.UI.showToast(
-					"(SHC) ChannelItemUtils is missing, voice channel lock icon won't be removed.",
-					{
-						type: "warning",
-					},
+			//* Use Discord's native combined voice + small lock icon
+			if (!VoiceLimitedIcon) {
+				this.warnChannelIconPatchOnce(
+					"voice-limited-icon-component-missing",
+					"Discord's native Voice (Limited) icon was not found; hidden voice channels cannot show the normal voice icon with a lock badge.",
+					{ VoiceLimitedIcon },
+				);
+			}
+
+			if (!ChannelItemIcon?.type) {
+				this.warnChannelIconPatchOnce(
+					"channel-item-icon-component-missing",
+					"Discord's channel icon component was not found; hidden voice channels cannot use the native Voice (Limited) icon.",
+					{ ChannelItemIcon },
 				);
 			} else {
-				Patcher.before(ChannelItemUtils, "icon", (_, args) => {
-					const [channel, , opts] =
-						/** @type {[SHCChannel, any, {locked: boolean}]} */ (args);
-					if (!opts) return;
+				try {
+					Patcher.after(ChannelItemIcon, "type", (_, args, res) => {
+						const [props] =
+							/** @type {[{
+								channel: SHCChannel,
+								locked: boolean
+							}]} */ (args);
+						const channel = props?.channel;
 
-					if (channel?.isHidden?.() && opts.locked) {
-						opts.locked = false;
-					}
-				});
+						if (
+							!props?.locked ||
+							!channel?.isHidden?.() ||
+							!channel?.isGuildVoice?.() ||
+							!VoiceLimitedIcon
+						) {
+							return res;
+						}
+
+						const iconContainer = res?.props?.children;
+						if (!iconContainer?.props?.children) {
+							this.warnChannelIconPatchOnce(
+								"channel-item-icon-render-shape-changed",
+								"Discord's channel icon render shape changed; hidden voice channels cannot use the native Voice (Limited) icon.",
+								{ result: res },
+							);
+							return res;
+						}
+
+						const currentIcon = iconContainer.props.children;
+						iconContainer.props.children = React.createElement(
+							VoiceLimitedIcon,
+							{
+								...currentIcon.props,
+								className: currentIcon.props?.className,
+								color: "currentColor",
+								size: "md",
+							},
+						);
+
+						if (res.props.text === "Voice (Locked)") {
+							res.props.text = "Voice (Limited)";
+						}
+						if (iconContainer.props["aria-label"] === "Voice (Locked) icon") {
+							iconContainer.props["aria-label"] = "Voice (Limited) icon";
+						}
+
+						return res;
+					});
+				} catch (error) {
+					Logger.err(
+						"Found Discord's channel icon component, but failed to patch it with the native Voice (Limited) icon.",
+						error,
+					);
+					this.api.UI.showToast(
+						"(SHC) Discord's channel icon component was found but could not be patched with the native Voice (Limited) icon.",
+						{
+							type: "warning",
+						},
+					);
+				}
 			}
 
 			//* Manually collapse hidden channel category

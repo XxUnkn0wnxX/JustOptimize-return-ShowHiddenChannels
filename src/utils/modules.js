@@ -126,11 +126,22 @@ export function getModules() {
 		m.render?.toString().includes(".ALL_MESSAGES"),
 	);
 
-	const ChannelItemUtils = WebpackModules.getMangled(
-		/hasActiveThreads:[a-zA-Z]+=!1,/,
-		{
-			icon: WebpackModules.Filters.byRegex(/hasActiveThreads:[a-zA-Z]+=!1,/),
-		},
+	const VoiceLimitedIcon = WebpackModules.getModule(
+		WebpackModules.Filters.byStrings(
+			"M16 4h.5v-.5",
+			"M20.5 12c-.28 0-.5.22-.52.5",
+		),
+		{ searchExports: true },
+	);
+
+	const ChannelItemIcon = WebpackModules.getModule(
+		(module) =>
+			module?.type &&
+			WebpackModules.Filters.byStrings(
+				"hasUsersInVoiceChannel",
+				"enableWaveformIcon",
+			)(module.type),
+		{ searchExports: true },
 	);
 
 	const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
@@ -252,7 +263,8 @@ export function getModules() {
 		chat,
 		Route,
 		ChannelItemRenderer,
-		ChannelItemUtils,
+		VoiceLimitedIcon,
+		ChannelItemIcon,
 		ChannelPermissionStore,
 		PermissionStoreActionHandler,
 		ChannelListStoreActionHandler,
