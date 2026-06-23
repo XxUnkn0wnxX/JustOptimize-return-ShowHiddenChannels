@@ -73,11 +73,6 @@ export function getModules() {
 	const GuildStore = WebpackModules.getStore("GuildStore");
 	const GuildRoleStore = WebpackModules.getStore("GuildRoleStore");
 
-	const MessageActions = WebpackModules.getByKeys(
-		"jumpToMessage",
-		"_sendMessage",
-		"fetchMessages", // This gets patched
-	);
 	const GuildChannelStore = WebpackModules.getStore("GuildChannelStore");
 	const GuildMemberStore = WebpackModules.getByKeys("getMember");
 	const NavigationUtils = WebpackModules.getMangled(
@@ -222,7 +217,6 @@ export function getModules() {
 
 		/* Discord Modules (From lib) */
 		ChannelStore,
-		MessageActions,
 		React,
 		ReactDOM,
 		GuildChannelStore,

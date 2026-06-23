@@ -467,7 +467,6 @@ export default (() => {
 
 				/* Discord Modules (From lib) */
 				ChannelStore,
-				MessageActions,
 				React,
 				GuildChannelStore,
 				NavigationUtils,
@@ -635,34 +634,6 @@ export default (() => {
 
 				return res;
 			});
-
-			//* Stop fetching messages if the channel is hidden
-			if (!MessageActions?.fetchMessages) {
-				this.api.UI.showToast(
-					"(SHC) MessageActions module is missing, this mean that the plugin could be detected by Discord.",
-					{
-						type: "warning",
-					},
-				);
-			}
-
-			Patcher.instead(
-				MessageActions,
-				"fetchMessages",
-				(instance, args, res) => {
-					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
-					const channel = ChannelStore.getChannel(fetchConfig.channelId);
-					const isLockedVoiceChannel =
-						channel?.isGuildVocal?.() &&
-						!this.can(DiscordConstants.Permissions.CONNECT, channel);
-
-					if (channel?.isHidden?.() || isLockedVoiceChannel) {
-						return;
-					}
-
-					return res.call(instance, fetchConfig);
-				},
-			);
 
 			if (this.settings.hiddenChannelIcon) {
 				if (!ChannelItemRenderer) {
