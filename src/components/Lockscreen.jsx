@@ -26,10 +26,11 @@ const CHANNEL_TYPES = {
 
 export const Lockscreen = React.memo(
 	(
-		/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any> }} */ {
+		/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean }} */ {
 			chat,
 			channel,
 			settings,
+			isLockedVoiceChannel = false,
 		},
 	) => {
 		const guild = GuildStore.getGuild(channel.guild_id);
@@ -66,7 +67,7 @@ export const Lockscreen = React.memo(
 							fontWeight: "bold",
 						}}
 					>
-						{`This is a hidden ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`}
+						{`This is a ${isLockedVoiceChannel ? "locked" : "hidden"} ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`}
 					</TextElement>
 					<TextElement
 						color={TextElement.Colors.HEADER_SECONDARY}
@@ -75,8 +76,11 @@ export const Lockscreen = React.memo(
 							marginTop: 8,
 						}}
 					>
-						You cannot see the contents of this channel.{" "}
-						{channel.topic &&
+						{isLockedVoiceChannel
+							? "You cannot connect to this channel."
+							: "You cannot see the contents of this channel."}{" "}
+						{!isLockedVoiceChannel &&
+							channel.topic &&
 							channel.type !== 15 &&
 							"However, you may see its topic."}
 					</TextElement>

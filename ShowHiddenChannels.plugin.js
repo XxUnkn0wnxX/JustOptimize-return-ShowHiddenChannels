@@ -365,10 +365,11 @@ const CHANNEL_TYPES = {
   6: "store",
   13: "stage"
 };
-const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any> }} */{
+const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean }} */{
   chat,
   channel,
-  settings
+  settings,
+  isLockedVoiceChannel = false
 }) => {
   const guild = GuildStore.getGuild(channel.guild_id);
   const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id);
@@ -396,13 +397,13 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
       marginTop: 20,
       fontWeight: "bold"
     }
-  }, `This is a hidden ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`), BdApi.React.createElement(TextElement, {
+  }, `This is a ${isLockedVoiceChannel ? "locked" : "hidden"} ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`), BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.HEADER_SECONDARY,
     size: TextElement.Sizes.SIZE_16,
     style: {
       marginTop: 8
     }
-  }, "You cannot see the contents of this channel.", " ", channel.topic && channel.type !== 15 && "However, you may see its topic."), channel.topic && channel.type !== 15 && (ChannelUtils?.renderTopic(channel, guild) || "ChannelUtils module is missing, topic won't be shown."), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
+  }, isLockedVoiceChannel ? "You cannot connect to this channel." : "You cannot see the contents of this channel.", " ", !isLockedVoiceChannel && channel.topic && channel.type !== 15 && "However, you may see its topic."), channel.topic && channel.type !== 15 && (ChannelUtils?.renderTopic(channel, guild) || "ChannelUtils module is missing, topic won't be shown."), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14,
     style: {
@@ -988,24 +989,6 @@ function getModules() {
 		m.render?.toString().includes(".ALL_MESSAGES"),
 	);
 
-	const VoiceLimitedIcon = WebpackModules.getModule(
-		WebpackModules.Filters.byStrings(
-			"M16 4h.5v-.5",
-			"M20.5 12c-.28 0-.5.22-.52.5",
-		),
-		{ searchExports: true },
-	);
-
-	const ChannelItemIcon = WebpackModules.getModule(
-		(module) =>
-			module?.type &&
-			WebpackModules.Filters.byStrings(
-				"hasUsersInVoiceChannel",
-				"enableWaveformIcon",
-			)(module.type),
-		{ searchExports: true },
-	);
-
 	const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
 		RolePill: (m) => m?.render != null,
 	})?.RolePill;
@@ -1125,8 +1108,6 @@ function getModules() {
 		chat,
 		Route,
 		ChannelItemRenderer,
-		VoiceLimitedIcon,
-		ChannelItemIcon,
 		ChannelPermissionStore,
 		PermissionStoreActionHandler,
 		ChannelListStoreActionHandler,
@@ -1324,7 +1305,7 @@ const config = {
 
 			this.hiddenChannelCache = {};
 			this.privateChannelHidingHotfixWarnings = new Set();
-			this.channelIconPatchWarnings = new Set();
+			this.lockedVoicePatchWarnings = new Set();
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
@@ -1706,10 +1687,10 @@ const config = {
 			(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(message);
 		}
 
-		warnChannelIconPatchOnce(key, message, details) {
-			if (this.channelIconPatchWarnings.has(key)) return;
+		warnLockedVoicePatchOnce(key, message, details) {
+			if (this.lockedVoicePatchWarnings.has(key)) return;
 
-			this.channelIconPatchWarnings.add(key);
+			this.lockedVoicePatchWarnings.add(key);
 			(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(message, details);
 			this.api.UI.showToast(`(SHC) ${message}`, {
 				type: "warning",
@@ -1725,7 +1706,7 @@ const config = {
 				/* Library */
 				Utilities,
 				// DOMTools,
-				Logger,
+				// Logger,
 				// ReactTools,
 
 				/* Discord Modules (From lib) */
@@ -1743,8 +1724,6 @@ const config = {
 				chat,
 				Route,
 				ChannelItemRenderer,
-				VoiceLimitedIcon,
-				ChannelItemIcon,
 				ChannelPermissionStore,
 				// PermissionStoreActionHandler,
 				// ChannelListStoreActionHandler,
@@ -1878,10 +1857,14 @@ const config = {
 				const channelId = res.props?.computedMatch?.params?.channelId;
 				const guildId = res.props?.computedMatch?.params?.guildId;
 				const channel = ChannelStore?.getChannel(channelId);
+				const isHiddenChannel = channel?.isHidden?.();
+				const isLockedVoiceChannel =
+					channel?.isGuildVocal?.() &&
+					!this.can(DiscordConstants.Permissions.CONNECT, channel);
 
 				if (
 					guildId &&
-					channel?.isHidden?.() &&
+					(isHiddenChannel || isLockedVoiceChannel) &&
 					channel?.id !== Voice.getChannelId()
 				) {
 					res.props.render = () =>
@@ -1889,6 +1872,8 @@ const config = {
 							chat,
 							channel,
 							settings: this.settings,
+							isLockedVoiceChannel:
+								isLockedVoiceChannel && !isHiddenChannel,
 						});
 				}
 
@@ -1910,7 +1895,12 @@ const config = {
 				"fetchMessages",
 				(instance, args, res) => {
 					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
-					if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
+					const channel = ChannelStore.getChannel(fetchConfig.channelId);
+					const isLockedVoiceChannel =
+						channel?.isGuildVocal?.() &&
+						!this.can(DiscordConstants.Permissions.CONNECT, channel);
+
+					if (channel?.isHidden?.() || isLockedVoiceChannel) {
 						return;
 					}
 
@@ -2004,82 +1994,59 @@ const config = {
 				});
 			}
 
-			//* Use Discord's native combined voice + small lock icon
-			if (!VoiceLimitedIcon) {
-				this.warnChannelIconPatchOnce(
-					"voice-limited-icon-component-missing",
-					"Discord's native Voice (Limited) icon was not found; hidden voice channels cannot show the normal voice icon with a lock badge.",
-					{ VoiceLimitedIcon },
-				);
-			}
+			//* Open SHC's channel information page for visible voice channels
+			//* that Discord shows but the current user cannot connect to.
+			if (ChannelItemRenderer) {
+				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
+					const [instance] =
+						/** @type {[{channel: SHCChannel}]} */ (args);
+					const channel = instance?.channel;
 
-			if (!ChannelItemIcon?.type) {
-				this.warnChannelIconPatchOnce(
-					"channel-item-icon-component-missing",
-					"Discord's channel icon component was not found; hidden voice channels cannot use the native Voice (Limited) icon.",
-					{ ChannelItemIcon },
-				);
-			} else {
-				try {
-					Patcher.after(ChannelItemIcon, "type", (_, args, res) => {
-						const [props] =
-							/** @type {[{
-								channel: SHCChannel,
-								locked: boolean
-							}]} */ (args);
-						const channel = props?.channel;
-
-						if (
-							!props?.locked ||
-							!channel?.isHidden?.() ||
-							!channel?.isGuildVoice?.() ||
-							!VoiceLimitedIcon
-						) {
-							return res;
-						}
-
-						const iconContainer = res?.props?.children;
-						if (!iconContainer?.props?.children) {
-							this.warnChannelIconPatchOnce(
-								"channel-item-icon-render-shape-changed",
-								"Discord's channel icon render shape changed; hidden voice channels cannot use the native Voice (Limited) icon.",
-								{ result: res },
-							);
-							return res;
-						}
-
-						const currentIcon = iconContainer.props.children;
-						iconContainer.props.children = React.createElement(
-							VoiceLimitedIcon,
-							{
-								...currentIcon.props,
-								className: currentIcon.props?.className,
-								color: "currentColor",
-								size: "md",
-							},
-						);
-
-						if (res.props.text === "Voice (Locked)") {
-							res.props.text = "Voice (Limited)";
-						}
-						if (iconContainer.props["aria-label"] === "Voice (Locked) icon") {
-							iconContainer.props["aria-label"] = "Voice (Limited) icon";
-						}
-
+					if (
+						!channel?.isGuildVocal?.() ||
+						channel?.isHidden?.() ||
+						this.can(DiscordConstants.Permissions.CONNECT, channel)
+					) {
 						return res;
-					});
-				} catch (error) {
-					Logger.err(
-						"Found Discord's channel icon component, but failed to patch it with the native Voice (Limited) icon.",
-						error,
-					);
-					this.api.UI.showToast(
-						"(SHC) Discord's channel icon component was found but could not be patched with the native Voice (Limited) icon.",
+					}
+
+					const channelLink = Utilities.findInTree(
+						res,
+						(node) =>
+							node?.props?.["data-list-item-id"] ===
+							`channels___${channel.id}`,
 						{
-							type: "warning",
+							walkable: ["props", "children", "child", "sibling"],
+							maxRecursion: 100,
 						},
 					);
-				}
+
+					if (!channelLink?.props) {
+						this.warnLockedVoicePatchOnce(
+							"locked-voice-channel-link-not-found",
+							"Discord's locked voice channel row shape changed; locked voice channels cannot open SHC's channel information page.",
+							{ channelId: channel.id, result: res },
+						);
+						return res;
+					}
+
+					channelLink.props.href = null;
+					channelLink.props.onMouseDown = (event) => {
+						event?.stopPropagation?.();
+					};
+					channelLink.props.onMouseUp = (event) => {
+						event?.stopPropagation?.();
+					};
+					channelLink.props.onClick = (event) => {
+						event?.preventDefault?.();
+						event?.stopPropagation?.();
+						NavigationUtils.transitionTo(
+							`/channels/${channel.guild_id}/${channel.id}`,
+						);
+					};
+
+					return res;
+				});
 			}
 
 			//* Manually collapse hidden channel category
