@@ -406,8 +406,8 @@ jobs:
           FINAL_RELEASE_TAG="$(jq -er '.tag_name | strings' <<< "$RELEASE_JSON")"
           FINAL_RELEASE_TARGET="$(jq -er '.target_commitish | strings' <<< "$RELEASE_JSON")"
           FINAL_RELEASE_TITLE="$(jq -er '.name | strings' <<< "$RELEASE_JSON")"
-          FINAL_RELEASE_DRAFT="$(jq -er '.draft | booleans' <<< "$RELEASE_JSON")"
-          FINAL_RELEASE_PRERELEASE="$(jq -er '.prerelease | booleans' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_DRAFT="$(jq -er '.draft | booleans | tostring' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_PRERELEASE="$(jq -er '.prerelease | booleans | tostring' <<< "$RELEASE_JSON")"
           FINAL_PUBLISHED_AT="$(jq -er '.published_at | strings' <<< "$RELEASE_JSON")"
           if [[ ! "$FINAL_RELEASE_ID" =~ ^[0-9]+$ ||
                 -n "$PRIOR_RELEASE_ID" && "$FINAL_RELEASE_ID" == "$PRIOR_RELEASE_ID" ||
