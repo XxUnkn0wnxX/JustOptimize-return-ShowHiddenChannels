@@ -7,11 +7,25 @@ The original plugin by [@rauenzi](https://github.com/rauenzi/) was discontinued 
 
 If you are searching for the [Replugged](https://replugged.dev/) version of this plugin, there is one made by ["Nanakusa"](https://github.com/YofukashiNo) you can find it [here](https://github.com/YofukashiNo/ShowHiddenChannels).
 
-## Warning, this plugin might soon stop working
+## Channel names show up as "No Access"
 
-Discord is working on an experimental feature that should hide private channels on the server side making it impossible for plugins like this to work, so it is possible that this plugin will soon be useless.
+Discord has rolled out the `2026-02-private-channel-hiding` experiment, which hides private channels on the server side. If you are in it, Discord never sends the real channel names to your client, so every hidden channel shows up as "No Access". The plugin still starts normally and the console reports no error, because there is nothing left for it to read.
 
 ![image](https://github.com/user-attachments/assets/fbe4a5df-e8dc-4afd-a43a-510ba6831632)
+
+This fork attempts to set the experiment to `Not Eligible` automatically when the plugin starts. If the console warns that the private-channel-hiding hotfix could not be applied, you can set the override manually:
+
+1.  Get access to the experiments page. [YABDP4Nitro](https://github.com/riolubruh/YABDP4Nitro) has a setting that enables it, or paste [this snippet](https://github.com/JustOptimize/ShowHiddenChannels/issues/279#issuecomment-4668816488) into DevTools. On Vencord and Equicord, use their Experiments plugin.
+2.  Open `Settings` > `Experiments`, search for `private-channel-hiding` and select the `2026-02-private-channel-hiding` entry.
+3.  Set the variant override to `Not Eligible`.
+4.  Fully close and reopen Discord.
+
+If the channels are still hidden after restarting, try these in order:
+
+-   Switch the override to another variant, set it back to `Not Eligible`, then press `Ctrl+R`.
+-   Log out and log back in, so Discord invalidates the cached channel list.
+
+See [#279](https://github.com/JustOptimize/ShowHiddenChannels/issues/279) for the full discussion.
 
 ## How to Install
 
@@ -34,6 +48,10 @@ corepack pnpm exec webpack --progress --color
 ```
 
 A local build resolves the GitHub repository from the checkout's `origin`. To override it, pass `--env updateRepo=owner/repo`. GitHub Actions supplies its workflow repository automatically; the original [JustOptimize/ShowHiddenChannels](https://github.com/JustOptimize/ShowHiddenChannels) repository remains the fallback. The resolved repository is used for the generated `@source`, `@updateUrl`, and stable self-update endpoint. Fork builds publish to the rolling `Nightly-Fork` release; prereleases are not used.
+
+The `develop` branch is source-only and does not track the generated root plugin. The release-ready `ShowHiddenChannels.plugin.js` is built and tracked on `main`.
+
+Fork maintenance notes are recorded in [docs/fork-specific-changes.md](docs/fork-specific-changes.md).
 
 ## Preview
 

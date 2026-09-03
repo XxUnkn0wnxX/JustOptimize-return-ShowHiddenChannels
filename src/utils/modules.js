@@ -174,7 +174,7 @@ export function getModules() {
 			renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 		}) ?? {};
 	if (!ChannelUtils?.renderTopic) {
-		Logger.debug("Failed to load ChannelUtils", ChannelUtils);
+		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
 	}
 
 	const ProfileActions = WebpackModules.getMangled(
