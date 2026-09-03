@@ -97,6 +97,24 @@ Key commits:
 - [`fa76c0a`](https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/commit/fa76c0ade41be1579e8f5ff0a13371ff5dc23c59) — simplify Nightly-Fork publication.
 - [`aaaacad`](https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/commit/aaaacad776d10ccae84a925e467ab8dabdf6ce92) — harden stable release validation.
 
+#### Release metadata extraction contract
+
+The `nightly-release-input` artifact contains exactly the compiled
+`ShowHiddenChannels.plugin.js` and `release-sha.txt`. The publisher parses only
+the plugin's dotted numeric `@version` from its generated header, checks out the
+exact release SHA, then reads `version` and the first changelog entry from
+`src/config.json`. It requires the plugin and source versions to match. Release
+notes consist of the full commit comparison followed by that changelog title
+and its items; changelog text is not scraped back out of the compiled plugin.
+
+Changes to the plugin header, config version/changelog schema, artifact names or
+layout, or release-note structure must update the matching workflow parser and
+gate in the same reviewed change. Before publication, tell the user exactly
+what changed and whether the fix belongs in the header `awk`, config/release
+note `jq`, or artifact validation. Verify the repair with a manual `Build
+Plugin` dispatch and its automatic publisher, then inspect the final release
+tag, target, title, body, single asset, and downloaded plugin bytes.
+
 `develop` and `main` intentionally cannot share the same tree or tip commit:
 the root plugin is absent from `develop` and present on `main`. Promotion must
 record real merge ancestry while retaining the generated plugin on `main`.
