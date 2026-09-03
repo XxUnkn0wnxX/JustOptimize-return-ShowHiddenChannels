@@ -156,9 +156,15 @@ jobs:
           fi
           git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
           REMOTE_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
-          if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" && "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Skipping stale build $RELEASE_SHA because current main is $REMOTE_MAIN_SHA."
+            exit 0
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] &&
+            ! git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_MAIN_SHA"; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping manual build $RELEASE_SHA because it is not an ancestor of current main $REMOTE_MAIN_SHA."
             exit 0
           fi
           if ! cmp -- "$PLUGIN_FILE" "ShowHiddenChannels.plugin.js"; then
@@ -280,8 +286,13 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
           REMOTE_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
-          if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" && "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
             echo "::notice::Skipping stale build $RELEASE_SHA because current main advanced to $REMOTE_MAIN_SHA."
+            exit 0
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] &&
+            ! git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_MAIN_SHA"; then
+            echo "::notice::Skipping manual build $RELEASE_SHA because it is not an ancestor of current main $REMOTE_MAIN_SHA."
             exit 0
           fi
 
@@ -317,424 +328,106 @@ jobs:
             fi
           }
 
+          TAG="Nightly-Fork"
           RELEASE_API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
-          lookup_release_http_status() {
-            local response
-            response="$(gh api --include --silent "$RELEASE_API" 2>/dev/null)" || true
-            printf '%s\n' "$response" |
-              sed -nE 's/^HTTP\/[0-9.]+[[:space:]]+([0-9]{3})([[:space:]].*)?$/\1/p' |
-              tail -n 1
+          release_list_for_tag() {
+            local all_releases filtered_releases release_count
+            if ! all_releases="$(gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100")"; then
+              echo "::error::Could not fetch the authenticated GitHub release list." >&2
+              return 1
+            fi
+            if ! filtered_releases="$(jq -c --arg tag "$TAG" \
+              'add // [] | map(select(.tag_name == $tag))' <<< "$all_releases")"; then
+              echo "::error::The authenticated GitHub release list returned invalid JSON." >&2
+              return 1
+            fi
+            if ! release_count="$(jq -er 'length' <<< "$filtered_releases")"; then
+              echo "::error::Could not count exact Nightly-Fork release matches." >&2
+              return 1
+            fi
+            if (( release_count > 1 )); then
+              echo "::error::The authenticated GitHub release list contains multiple Nightly-Fork matches." >&2
+              return 1
+            fi
+            printf '%s\n' "$filtered_releases"
           }
 
-          if [[ "$RELEASE_EXISTS" == "true" ]]; then
-            if ! PRIOR_RELEASE_JSON="$(gh api "$RELEASE_API")"; then
-              echo "::error::Could not fetch the existing Nightly-Fork release before mutation."
+          if ! RELEASE_LIST_JSON="$(release_list_for_tag)"; then
+            exit 1
+          fi
+          RELEASE_COUNT="$(jq -er 'length' <<< "$RELEASE_LIST_JSON")"
+          PRIOR_RELEASE_ID=""
+          if [[ "$RELEASE_COUNT" == "1" ]]; then
+            if ! PRIOR_RELEASE_ID="$(jq -er '.[0].id | numbers' <<< "$RELEASE_LIST_JSON")"; then
+              echo "::error::The existing Nightly-Fork release returned an invalid numeric ID."
               exit 1
             fi
-            if ! PRIOR_RELEASE_ID="$(jq -er '.id | numbers' <<< "$PRIOR_RELEASE_JSON")" ||
-              ! PRIOR_RELEASE_TAG="$(jq -er '.tag_name | strings' <<< "$PRIOR_RELEASE_JSON")" ||
-              ! PRIOR_RELEASE_TITLE="$(jq -er '.name | strings' <<< "$PRIOR_RELEASE_JSON")" ||
-              ! PRIOR_RELEASE_TARGET="$(jq -er '.target_commitish | strings' <<< "$PRIOR_RELEASE_JSON")" ||
-              ! jq -e '(.body | type) == "string"' <<< "$PRIOR_RELEASE_JSON" >/dev/null; then
-              echo "::error::The existing Nightly-Fork release JSON is missing a valid ID, title, body, or target."
+            if [[ ! "$PRIOR_RELEASE_ID" =~ ^[0-9]+$ ]]; then
+              echo "::error::The existing Nightly-Fork release returned an invalid numeric ID."
               exit 1
             fi
-            if [[ ! "$PRIOR_RELEASE_ID" =~ ^[0-9]+$ ||
-                  "$PRIOR_RELEASE_TAG" != "$TAG" ||
-                  ! "$PRIOR_RELEASE_TITLE" =~ [^[:space:]] ||
-                  "$PRIOR_RELEASE_TITLE" == *$'\n'* ||
-                  "$PRIOR_RELEASE_TITLE" == *$'\r'* ||
-                  ! "$PRIOR_RELEASE_TARGET" =~ ^[0-9a-fA-F]{40}$ ||
-                  "${PRIOR_RELEASE_TARGET,,}" != "${PREVIOUS_TAG_SHA,,}" ]]; then
-              echo "::error::The existing Nightly-Fork release JSON does not match its validated tag, title, or target."
-              exit 1
-            fi
+          fi
 
-            BACKUP_DIR="${RUNNER_TEMP}/nightly-release-backup"
-            mkdir -p "$BACKUP_DIR"
-            BACKUP_PLUGIN="$BACKUP_DIR/ShowHiddenChannels.plugin.js"
-            PRIOR_BODY_FILE="$BACKUP_DIR/previous-release-notes.md"
-            jq -j '.body' <<< "$PRIOR_RELEASE_JSON" > "$PRIOR_BODY_FILE"
-            if ! gh release download "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern "ShowHiddenChannels.plugin.js" \
-              --dir "$BACKUP_DIR"; then
-              echo "::error::Could not back up the current ShowHiddenChannels.plugin.js before mutation."
-              exit 1
-            fi
-            if [[ ! -s "$BACKUP_PLUGIN" ]]; then
-              echo "::error::The current ShowHiddenChannels.plugin.js backup is missing or empty; refusing to mutate the release."
-              exit 1
-            fi
+          if ! force_tag_to_sha "$RELEASE_SHA"; then
+            echo "::error::Could not force Nightly-Fork to the release commit $RELEASE_SHA."
+            exit 1
+          fi
+          VERIFIED_TAG_SHA="$(remote_tag_sha)"
+          if [[ "${VERIFIED_TAG_SHA,,}" != "${RELEASE_SHA,,}" ]]; then
+            echo "::error::Remote Nightly-Fork resolved to $VERIFIED_TAG_SHA, expected $RELEASE_SHA."
+            exit 1
+          fi
 
-            OLD_RELEASE_DELETE_STARTED="false"
-            OLD_RELEASE_REMOVED="false"
-            REPLACEMENT_RELEASE_ID=""
-            ROLLBACK_REASON="Refreshing the existing Nightly-Fork release failed."
-            rollback_existing_release() {
-              local original_status="$?"
-              local cleanup_ok="true"
-              local release_http_status
-              local release_json
-              local release_id
-              local release_tag
-              local release_target
-              local release_name
-              local replacement_matches="false"
-              local prior_release_missing="$OLD_RELEASE_REMOVED"
-              local restored_release_json
-              local restored_release_id
-              trap - EXIT
-              set +e
+          if [[ -n "$PRIOR_RELEASE_ID" ]]; then
+            gh api --method DELETE --silent \
+              "repos/$GITHUB_REPOSITORY/releases/$PRIOR_RELEASE_ID"
+          fi
+          if ! RELEASE_LIST_JSON="$(release_list_for_tag)"; then
+            echo "::error::Could not verify exact Nightly-Fork release absence after deletion."
+            exit 1
+          fi
+          if [[ "$(jq -er 'length' <<< "$RELEASE_LIST_JSON")" != "0" ]]; then
+            echo "::error::Nightly-Fork still has a tagged release after prior-release deletion."
+            exit 1
+          fi
 
-              if [[ "$original_status" == "0" ]]; then
-                exit "$original_status"
-              fi
+          START_EPOCH="$(date -u +%s)"
+          gh release create "$TAG" "$PLUGIN_FILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --target "$RELEASE_SHA" \
+            --title "v${VERSION} - Nightly-Fork" \
+            --notes-file "$NOTES_FILE" \
+            --latest
 
-              echo "::error::$ROLLBACK_REASON Starting rollback while preserving failure status $original_status."
-              release_http_status="$(lookup_release_http_status)"
-              case "$release_http_status" in
-                200)
-                  if release_json="$(gh api "$RELEASE_API" 2>/dev/null)"; then
-                    release_id="$(jq -er '.id | numbers' <<< "$release_json")" || release_id=""
-                    release_tag="$(jq -er '.tag_name | strings' <<< "$release_json")" || release_tag=""
-                    release_target="$(jq -er '.target_commitish | strings' <<< "$release_json")" || release_target=""
-                    release_name="$(jq -er '.name | strings' <<< "$release_json")" || release_name=""
+          RELEASE_JSON="$(gh api "$RELEASE_API")"
+          FINAL_RELEASE_ID="$(jq -er '.id | numbers' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_TAG="$(jq -er '.tag_name | strings' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_TARGET="$(jq -er '.target_commitish | strings' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_TITLE="$(jq -er '.name | strings' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_DRAFT="$(jq -er '.draft | booleans' <<< "$RELEASE_JSON")"
+          FINAL_RELEASE_PRERELEASE="$(jq -er '.prerelease | booleans' <<< "$RELEASE_JSON")"
+          FINAL_PUBLISHED_AT="$(jq -er '.published_at | strings' <<< "$RELEASE_JSON")"
+          if [[ ! "$FINAL_RELEASE_ID" =~ ^[0-9]+$ ||
+                -n "$PRIOR_RELEASE_ID" && "$FINAL_RELEASE_ID" == "$PRIOR_RELEASE_ID" ||
+                "$FINAL_RELEASE_TAG" != "$TAG" ||
+                "${FINAL_RELEASE_TARGET,,}" != "${RELEASE_SHA,,}" ||
+                "$FINAL_RELEASE_TITLE" != "v${VERSION} - Nightly-Fork" ||
+                "$FINAL_RELEASE_DRAFT" != "false" ||
+                "$FINAL_RELEASE_PRERELEASE" != "false" ||
+                -z "$FINAL_PUBLISHED_AT" ]]; then
+            echo "::error::The published Nightly-Fork release failed ID, tag, target, title, stability, or timestamp validation."
+            exit 1
+          fi
 
-                    if [[ "$release_id" == "$PRIOR_RELEASE_ID" ]]; then
-                      if [[ "$OLD_RELEASE_REMOVED" == "true" ]]; then
-                        echo "::error::The prior release ID $PRIOR_RELEASE_ID reappeared during rollback; refusing to overwrite it."
-                        cleanup_ok="false"
-                      fi
-                    elif [[ "$release_id" =~ ^[0-9]+$ &&
-                          "$release_id" != "$PRIOR_RELEASE_ID" &&
-                          "$release_tag" == "$TAG" &&
-                          "${release_target,,}" == "${RELEASE_SHA,,}" &&
-                          ("$release_name" == "$TAG" || "$release_name" == "v${VERSION} - $TAG") &&
-                          ( -z "$REPLACEMENT_RELEASE_ID" || "$release_id" == "$REPLACEMENT_RELEASE_ID" ) ]]; then
-                      replacement_matches="true"
-                    else
-                      echo "::error::The Nightly-Fork release API returned an unrelated or invalid release during rollback; refusing deletion."
-                      cleanup_ok="false"
-                    fi
-
-                    if [[ "$replacement_matches" == "true" ]]; then
-                      if gh api --method DELETE --silent \
-                        "repos/$GITHUB_REPOSITORY/releases/$release_id"; then
-                        release_http_status="$(lookup_release_http_status)"
-                        if [[ "$release_http_status" == "404" ]]; then
-                          echo "::notice::The replacement Nightly-Fork release $release_id was deleted and verified gone during rollback."
-                          prior_release_missing="true"
-                        else
-                          echo "::error::Rollback could not verify replacement release $release_id deletion; API lookup returned HTTP ${release_http_status:-unknown}."
-                          cleanup_ok="false"
-                        fi
-                      else
-                        echo "::error::Rollback failed to delete the verified replacement Nightly-Fork release $release_id."
-                        cleanup_ok="false"
-                      fi
-                    fi
-                  else
-                    echo "::error::Rollback could not fetch the Nightly-Fork release JSON after an HTTP 200; API state is unknown and deletion is refused."
-                    cleanup_ok="false"
-                  fi
-                  ;;
-                404)
-                  if [[ "$OLD_RELEASE_DELETE_STARTED" == "true" ]]; then
-                    prior_release_missing="true"
-                  else
-                    echo "::error::The prior Nightly-Fork release disappeared before deletion; API state is unknown and restoration is incomplete."
-                    cleanup_ok="false"
-                  fi
-                  ;;
-                "")
-                  echo "::error::Rollback could not determine the Nightly-Fork release API status; API state is unknown and deletion is refused."
-                  cleanup_ok="false"
-                  ;;
-                *)
-                  echo "::error::Rollback found unexpected Nightly-Fork release API status $release_http_status; API state is unknown and deletion is refused."
-                  cleanup_ok="false"
-                  ;;
-              esac
-
-              if force_tag_to_sha "$PREVIOUS_TAG_SHA"; then
-                :
-              else
-                echo "::error::Failed to restore remote $TAG to $PREVIOUS_TAG_SHA during rollback."
-                cleanup_ok="false"
-              fi
-
-              if [[ "$prior_release_missing" == "true" ]]; then
-                if [[ "$cleanup_ok" == "true" ]]; then
-                  if gh release create "$TAG" \
-                    --repo "$GITHUB_REPOSITORY" \
-                    --verify-tag \
-                    --target "$PREVIOUS_TAG_SHA" \
-                    --title "$PRIOR_RELEASE_TITLE" \
-                    --notes-file "$PRIOR_BODY_FILE" \
-                    --draft; then
-                    if restored_release_json="$(gh api "$RELEASE_API" 2>/dev/null)"; then
-                      restored_release_id="$(jq -er '.id | numbers' <<< "$restored_release_json")" || restored_release_id=""
-                      release_tag="$(jq -er '.tag_name | strings' <<< "$restored_release_json")" || release_tag=""
-                      release_target="$(jq -er '.target_commitish | strings' <<< "$restored_release_json")" || release_target=""
-                      if [[ "$restored_release_id" =~ ^[0-9]+$ &&
-                            "$release_tag" == "$TAG" &&
-                            "${release_target,,}" == "${PREVIOUS_TAG_SHA,,}" ]]; then
-                        if ! gh release upload "$TAG" "$BACKUP_PLUGIN" \
-                          --repo "$GITHUB_REPOSITORY" \
-                          --clobber; then
-                          echo "::error::Failed to restore the backed-up ShowHiddenChannels.plugin.js to the prior release."
-                          cleanup_ok="false"
-                        elif ! gh release edit "$TAG" \
-                          --repo "$GITHUB_REPOSITORY" \
-                          --title "$PRIOR_RELEASE_TITLE" \
-                          --notes-file "$PRIOR_BODY_FILE" \
-                          --target "$PREVIOUS_TAG_SHA" \
-                          --draft=false \
-                          --prerelease=false \
-                          --latest; then
-                          echo "::error::Failed to restore the prior Nightly-Fork release publication state."
-                          cleanup_ok="false"
-                        else
-                          echo "::notice::The prior Nightly-Fork release and plugin asset were restored with a new release ID $restored_release_id."
-                        fi
-                      else
-                        echo "::error::The recreated prior Nightly-Fork release could not be validated; rollback is incomplete."
-                        cleanup_ok="false"
-                      fi
-                    else
-                      echo "::error::Could not fetch the recreated prior Nightly-Fork release; API state is unknown and rollback is incomplete."
-                      cleanup_ok="false"
-                    fi
-                  else
-                    echo "::error::Failed to recreate the prior Nightly-Fork release; rollback is incomplete."
-                    cleanup_ok="false"
-                  fi
-                else
-                  echo "::error::The prior Nightly-Fork release was removed, but rollback cannot safely recreate it until API and tag state are verified."
-                fi
-              fi
-
-              if [[ "$cleanup_ok" == "true" ]]; then
-                echo "::error::$ROLLBACK_REASON Rollback completed; preserving original failure status $original_status."
-              else
-                echo "::error::$ROLLBACK_REASON Rollback was incomplete; manual repair may be required. Preserving original failure status $original_status."
-              fi
-              exit "$original_status"
-            }
-            trap rollback_existing_release EXIT
-
-            if force_tag_to_sha "$RELEASE_SHA"; then
-              :
-            else
-              mutation_status="$?"
-              ROLLBACK_REASON="Moving $TAG to $RELEASE_SHA failed or could not be verified."
-              exit "$mutation_status"
-            fi
-
-            OLD_RELEASE_DELETE_STARTED="true"
-            if gh api --method DELETE --silent \
-              "repos/$GITHUB_REPOSITORY/releases/$PRIOR_RELEASE_ID"; then
-              :
-            else
-              mutation_status="$?"
-              ROLLBACK_REASON="Deleting the prior Nightly-Fork release failed."
-              exit "$mutation_status"
-            fi
-
-            RELEASE_HTTP_STATUS="$(lookup_release_http_status)"
-            if [[ "$RELEASE_HTTP_STATUS" != "404" ]]; then
-              echo "::error::The prior Nightly-Fork release was not verified gone; API lookup returned HTTP ${RELEASE_HTTP_STATUS:-unknown}."
-              ROLLBACK_REASON="Deleting the prior Nightly-Fork release was not verified."
-              exit 1
-            fi
-            OLD_RELEASE_REMOVED="true"
-
-            VERIFIED_TAG_SHA="$(remote_tag_sha)"
-            if [[ "${VERIFIED_TAG_SHA,,}" != "${RELEASE_SHA,,}" ]]; then
-              echo "::error::Remote $TAG resolved to $VERIFIED_TAG_SHA, expected $RELEASE_SHA before replacement creation."
-              ROLLBACK_REASON="The replacement tag target could not be verified."
-              exit 1
-            fi
-            if gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --target "$VERIFIED_TAG_SHA" \
-              --title "$TAG" \
-              --notes-file "$NOTES_FILE" \
-              --draft; then
-              :
-            else
-              mutation_status="$?"
-              ROLLBACK_REASON="Creating the replacement Nightly-Fork draft failed."
-              exit "$mutation_status"
-            fi
-            if ! REPLACEMENT_RELEASE_JSON="$(gh api "$RELEASE_API")"; then
-              ROLLBACK_REASON="The replacement Nightly-Fork draft could not be fetched after creation."
-              exit 1
-            fi
-            if ! REPLACEMENT_RELEASE_ID="$(jq -er '.id | numbers' <<< "$REPLACEMENT_RELEASE_JSON")"; then
-              ROLLBACK_REASON="The replacement Nightly-Fork draft returned an invalid release ID."
-              exit 1
-            fi
-            REPLACEMENT_RELEASE_TAG="$(jq -er '.tag_name | strings' <<< "$REPLACEMENT_RELEASE_JSON")" || REPLACEMENT_RELEASE_TAG=""
-            REPLACEMENT_RELEASE_TARGET="$(jq -er '.target_commitish | strings' <<< "$REPLACEMENT_RELEASE_JSON")" || REPLACEMENT_RELEASE_TARGET=""
-            REPLACEMENT_RELEASE_DRAFT="$(jq -er '.draft | booleans' <<< "$REPLACEMENT_RELEASE_JSON")" || REPLACEMENT_RELEASE_DRAFT=""
-            if [[ ! "$REPLACEMENT_RELEASE_ID" =~ ^[0-9]+$ ||
-                  "$REPLACEMENT_RELEASE_ID" == "$PRIOR_RELEASE_ID" ||
-                  "$REPLACEMENT_RELEASE_TAG" != "$TAG" ||
-                  "${REPLACEMENT_RELEASE_TARGET,,}" != "${RELEASE_SHA,,}" ||
-                  "$REPLACEMENT_RELEASE_DRAFT" != "true" ]]; then
-              ROLLBACK_REASON="The replacement Nightly-Fork draft did not validate against the moved tag."
-              echo "::error::$ROLLBACK_REASON"
-              exit 1
-            fi
-            if gh release upload "$TAG" "$PLUGIN_FILE" \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber; then
-              :
-            else
-              mutation_status="$?"
-              ROLLBACK_REASON="Uploading the new plugin to the replacement release failed."
-              exit "$mutation_status"
-            fi
-          else
-            cleanup_new_draft() {
-              local original_status=$?
-              local cleanup_ok="true"
-              local current_tag_sha
-              local release_json
-              local release_id
-              local release_tag
-              local release_draft
-              local release_target
-              local release_http_status
-              trap - EXIT
-              set +e
-
-              if [[ "$original_status" == "0" ]]; then
-                exit "$original_status"
-              fi
-
-              echo "::error::Release publication failed; checking for an ambiguously created Nightly-Fork release."
-              release_http_status="$(lookup_release_http_status)"
-              case "$release_http_status" in
-                200)
-                  if release_json="$(gh api "$RELEASE_API" 2>/dev/null)"; then
-                    release_id="$(jq -er '.id | numbers' <<< "$release_json")" || release_id=""
-                    release_tag="$(jq -er '.tag_name | strings' <<< "$release_json")" || release_tag=""
-                    release_draft="$(jq -er '.draft | booleans' <<< "$release_json")" || release_draft=""
-                    release_target="$(jq -er '.target_commitish | strings' <<< "$release_json")" || release_target=""
-
-                    if [[ "$release_id" =~ ^[0-9]+$ &&
-                          "$release_tag" == "$TAG" &&
-                          "$release_draft" == "true" &&
-                          "${release_target,,}" == "${RELEASE_SHA,,}" ]]; then
-                      if ! gh api --method DELETE --silent \
-                        "repos/$GITHUB_REPOSITORY/releases/$release_id"; then
-                        echo "::error::Failed to delete the newly created Nightly-Fork draft release $release_id."
-                        cleanup_ok="false"
-                      else
-                        release_http_status="$(lookup_release_http_status)"
-                        if [[ "$release_http_status" == "404" ]]; then
-                          echo "::notice::The newly created Nightly-Fork draft release was deleted and verified gone."
-                        else
-                          echo "::error::The newly created Nightly-Fork draft release could not be verified gone; API lookup returned HTTP ${release_http_status:-unknown}."
-                          cleanup_ok="false"
-                        fi
-                      fi
-                    elif [[ ! "$release_id" =~ ^[0-9]+$ ]]; then
-                      echo "::error::Refusing to delete the ambiguous Nightly-Fork release because its API ID is not numeric."
-                      cleanup_ok="false"
-                    else
-                      echo "::error::Refusing to delete the ambiguous Nightly-Fork release because it is not the new draft for $RELEASE_SHA."
-                      cleanup_ok="false"
-                    fi
-                  else
-                    echo "::error::Failed to fetch the Nightly-Fork release JSON after an HTTP 200 during ambiguous-success cleanup."
-                    cleanup_ok="false"
-                  fi
-                  ;;
-                404)
-                  echo "::notice::No Nightly-Fork release was found during ambiguous-success cleanup (HTTP 404)."
-                  ;;
-                "")
-                  echo "::error::Could not verify the Nightly-Fork release API lookup HTTP status during ambiguous-success cleanup."
-                  cleanup_ok="false"
-                  ;;
-                *)
-                  echo "::error::The Nightly-Fork release API lookup returned unexpected HTTP status $release_http_status during ambiguous-success cleanup."
-                  cleanup_ok="false"
-                  ;;
-              esac
-
-              if [[ "$PREVIOUS_TAG_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-                if ! git push --force origin "$PREVIOUS_TAG_SHA:refs/tags/$TAG"; then
-                  echo "::error::Failed to restore Nightly-Fork to the previous tag target $PREVIOUS_TAG_SHA."
-                  cleanup_ok="false"
-                else
-                  current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" 2>/dev/null | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
-                  if [[ -z "$current_tag_sha" ]]; then
-                    current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" 2>/dev/null | awk '$2 !~ /\^\{\}$/ { print $1; exit }')"
-                  fi
-                  if [[ "${current_tag_sha,,}" != "${PREVIOUS_TAG_SHA,,}" ]]; then
-                    echo "::error::Nightly-Fork did not verify at the previous tag target $PREVIOUS_TAG_SHA after cleanup."
-                    cleanup_ok="false"
-                  fi
-                fi
-              else
-                current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" 2>/dev/null | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
-                if [[ -z "$current_tag_sha" ]]; then
-                  current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" 2>/dev/null | awk '$2 !~ /\^\{\}$/ { print $1; exit }')"
-                fi
-                if [[ "${current_tag_sha,,}" == "${RELEASE_SHA,,}" ]]; then
-                  if ! git push origin ":refs/tags/$TAG"; then
-                    echo "::error::Failed to delete the newly created Nightly-Fork tag."
-                    cleanup_ok="false"
-                  elif git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
-                    echo "::error::The newly created Nightly-Fork tag still exists after cleanup."
-                    cleanup_ok="false"
-                  fi
-                elif [[ -z "$current_tag_sha" ]]; then
-                  echo "::notice::Nightly-Fork tag was already absent during cleanup."
-                else
-                  echo "::error::Refusing to delete Nightly-Fork because its current target $current_tag_sha is not the newly created release $RELEASE_SHA."
-                  cleanup_ok="false"
-                fi
-              fi
-
-              if [[ "$cleanup_ok" == "true" ]]; then
-                echo "::error::Nightly-Fork cleanup completed; preserving original failure status $original_status."
-              else
-                echo "::error::Nightly-Fork cleanup was incomplete; manual repair may be required. Preserving original failure status $original_status."
-              fi
-              exit "$original_status"
-            }
-            trap cleanup_new_draft EXIT
-
-            if force_tag_to_sha "$RELEASE_SHA"; then
-              :
-            else
-              mutation_status="$?"
-              echo "::error::Could not force $TAG to the release commit $RELEASE_SHA before creating the release."
-              exit "$mutation_status"
-            fi
-            VERIFIED_TAG_SHA="$(remote_tag_sha)"
-            if [[ "${VERIFIED_TAG_SHA,,}" != "${RELEASE_SHA,,}" ]]; then
-              echo "::error::Remote $TAG resolved to $VERIFIED_TAG_SHA, expected $RELEASE_SHA before release creation."
-              exit 1
-            fi
-
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --target "$VERIFIED_TAG_SHA" \
-              --title "$TAG" \
-              --notes-file "$NOTES_FILE" \
-              --draft
-            gh release upload "$TAG" "$PLUGIN_FILE" \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
+          PUBLISHED_EPOCH="$(date -u -d "$FINAL_PUBLISHED_AT" +%s 2>/dev/null)"
+          NOW_EPOCH="$(date -u +%s)"
+          if [[ ! "$PUBLISHED_EPOCH" =~ ^[0-9]+$ ||
+                "$PUBLISHED_EPOCH" -lt $((START_EPOCH - 60)) ||
+                "$PUBLISHED_EPOCH" -gt $((NOW_EPOCH + 60)) ]]; then
+            echo "::error::The published_at timestamp is outside the current publication window."
+            exit 1
           fi
 
           release_assets() {
@@ -744,56 +437,29 @@ jobs:
               | jq -c 'add // []'
           }
 
-          RELEASE_JSON="$(gh api "$RELEASE_API")"
-          RELEASE_ID="$(jq -er '.id | numbers' <<< "$RELEASE_JSON")"
-          if [[ ! "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
-            echo "::error::The rolling release API returned an invalid release ID."
-            exit 1
-          fi
-
-          ASSETS_JSON="$(release_assets "$RELEASE_ID")"
-          mapfile -t NON_PLUGIN_ASSET_IDS < <(
-            jq -r '.[] | select(.name != "ShowHiddenChannels.plugin.js") | .id' <<< "$ASSETS_JSON"
-          )
-          for asset_id in "${NON_PLUGIN_ASSET_IDS[@]}"; do
-            [[ -n "$asset_id" ]] || continue
-            if [[ ! "$asset_id" =~ ^[0-9]+$ ]]; then
-              echo "::error::The rolling release API returned an invalid asset ID."
-              exit 1
-            fi
-            gh api --method DELETE --silent \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-          done
-
-          ASSETS_JSON="$(release_assets "$RELEASE_ID")"
+          ASSETS_JSON="$(release_assets "$FINAL_RELEASE_ID")"
           ASSET_COUNT="$(jq -er 'length' <<< "$ASSETS_JSON")"
           PLUGIN_ASSET_COUNT="$(jq -er '[.[] | select(.name == "ShowHiddenChannels.plugin.js")] | length' <<< "$ASSETS_JSON")"
           NON_EMPTY_PLUGIN_COUNT="$(jq -er '[.[] | select(.name == "ShowHiddenChannels.plugin.js" and (.size | type) == "number" and .size > 0)] | length' <<< "$ASSETS_JSON")"
-
-          if [[ "$ASSET_COUNT" != "1" || "$PLUGIN_ASSET_COUNT" != "1" || "$NON_EMPTY_PLUGIN_COUNT" != "1" ]]; then
-            echo "::error::The rolling release must contain exactly one non-empty explicit asset named ShowHiddenChannels.plugin.js."
+          if [[ "$ASSET_COUNT" != "1" ||
+                "$PLUGIN_ASSET_COUNT" != "1" ||
+                "$NON_EMPTY_PLUGIN_COUNT" != "1" ]]; then
+            echo "::error::Nightly-Fork must contain exactly one non-empty explicit plugin asset."
             jq -c '.' <<< "$ASSETS_JSON"
             exit 1
           fi
 
-          gh release edit "$TAG" \
+          VERIFY_DIR="${RUNNER_TEMP}/showhiddenchannels-nightly-verify"
+          mkdir -p "$VERIFY_DIR"
+          if ! gh release download "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "v${VERSION} - Nightly-Fork" \
-            --notes-file "$NOTES_FILE" \
-            --target "$RELEASE_SHA" \
-            --draft=false \
-            --prerelease=false \
-            --latest
-
-          FINAL_RELEASE_JSON="$(gh api "$RELEASE_API")"
-          FINAL_RELEASE_ID="$(jq -er '.id | numbers' <<< "$FINAL_RELEASE_JSON")"
-          FINAL_PUBLISHED_AT="$(jq -er '.published_at | strings' <<< "$FINAL_RELEASE_JSON")"
-          if [[ ! "$FINAL_RELEASE_ID" =~ ^[0-9]+$ || -z "$FINAL_PUBLISHED_AT" ]]; then
-            echo "::error::The published Nightly-Fork release did not return a numeric ID and non-empty published_at timestamp."
+            --pattern "ShowHiddenChannels.plugin.js" \
+            --dir "$VERIFY_DIR"; then
+            echo "::error::Could not download the published ShowHiddenChannels.plugin.js for verification."
             exit 1
           fi
-          if [[ "$RELEASE_EXISTS" == "true" && "$FINAL_RELEASE_ID" == "$PRIOR_RELEASE_ID" ]]; then
-            echo "::error::The recreated Nightly-Fork release reused the prior release ID $PRIOR_RELEASE_ID."
+          if [[ ! -s "$VERIFY_DIR/ShowHiddenChannels.plugin.js" ]] ||
+            ! cmp -- "$PLUGIN_FILE" "$VERIFY_DIR/ShowHiddenChannels.plugin.js"; then
+            echo "::error::The published plugin asset does not match the release artifact."
             exit 1
           fi
-          trap - EXIT
