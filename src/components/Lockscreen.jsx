@@ -83,7 +83,7 @@ export const Lockscreen = React.memo(
 					{/* Topic */}
 					{channel.topic &&
 						channel.type !== 15 &&
-						(ChannelUtils?.renderTopic(channel, guild) ||
+						(ChannelUtils?.renderTopic?.(channel, guild) ||
 							"ChannelUtils module is missing, topic won't be shown.")}
 
 					{/* Icon Emoji */}

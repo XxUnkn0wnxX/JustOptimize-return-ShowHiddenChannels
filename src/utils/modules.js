@@ -166,14 +166,9 @@ export function getModules() {
 		"hubContainer",
 	)?.container;
 
-	const ChannelRecordBase = WebpackModules.getMangled(
-		"isManaged(){return null",
-		{
-			ChannelRecordBase: WebpackModules.Filters.byStrings(
-				"isManaged(){return null",
-			),
-		},
-	)?.ChannelRecordBase;
+	const createChannelRecord = WebpackModules.getByKeys(
+		"createChannelRecord",
+	)?.createChannelRecord;
 
 	const ChannelListStore = WebpackModules.getStore("ChannelListStore");
 	const DEFAULT_AVATARS =
@@ -190,8 +185,7 @@ export function getModules() {
 		renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 	});
 	if (!ChannelUtils?.renderTopic) {
-		loaded_successfully = false;
-		Logger.err("Failed to load ChannelUtils", ChannelUtils);
+		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
 	}
 
 	const ProfileActions = WebpackModules.getMangled(
@@ -257,7 +251,7 @@ export function getModules() {
 		PermissionStoreActionHandler,
 		ChannelListStoreActionHandler,
 		container,
-		ChannelRecordBase,
+		createChannelRecord,
 		ChannelListStore,
 		DEFAULT_AVATARS,
 		iconItem,

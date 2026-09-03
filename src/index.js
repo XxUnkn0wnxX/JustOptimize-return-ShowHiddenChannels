@@ -340,7 +340,7 @@ export default (() => {
 				// PermissionStoreActionHandler,
 				// ChannelListStoreActionHandler,
 				// container,
-				ChannelRecordBase,
+				createChannelRecord,
 				ChannelListStore,
 				iconItem,
 				actionIcon,
@@ -351,7 +351,7 @@ export default (() => {
 
 			// Check for needed modules
 			if (
-				!ChannelRecordBase ||
+				!createChannelRecord ||
 				!DiscordConstants ||
 				!ChannelStore ||
 				!ChannelPermissionStore?.can ||
@@ -365,18 +365,6 @@ export default (() => {
 					},
 				);
 			}
-
-			Patcher.instead(
-				ChannelRecordBase.prototype,
-				"isHidden",
-				(unknownChannel) => {
-					const channel = /** @type {SHCChannel} */ (unknownChannel);
-					return (
-						![1, 3].includes(channel.type) &&
-						!this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel)
-					);
-				},
-			);
 
 			if (!ReadStateStore) {
 				this.api.UI.showToast(
@@ -394,7 +382,7 @@ export default (() => {
 					if (this.settings.MarkUnread) return res;
 
 					const [channel] = /** @type {[SHCChannel]} */ (args);
-					return channel?.isHidden()
+					return this.isHidden(channel)
 						? {
 								mentionCount: 0,
 								unread: false,
@@ -406,31 +394,31 @@ export default (() => {
 			Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				return this.isHidden(ChannelStore.getChannel(args[0])) ? 0 : res;
 			});
 
 			Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				return this.isHidden(ChannelStore.getChannel(args[0])) ? 0 : res;
 			});
 
 			Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHidden(ChannelStore.getChannel(args[0]));
 			});
 
 			Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHidden(ChannelStore.getChannel(args[0]));
 			});
 
 			Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHidden(ChannelStore.getChannel(args[0]));
 			});
 
 			//* Make hidden channel visible
@@ -438,7 +426,7 @@ export default (() => {
 				const [permission, channel] = /** @type {[bigint, SHCChannel]} */ (
 					args
 				);
-				if (!channel?.isHidden?.()) return res;
+				if (!this.isHidden(channel)) return res;
 
 				if (permission === DiscordConstants.Permissions.VIEW_CHANNEL) {
 					return (
@@ -472,7 +460,7 @@ export default (() => {
 
 				if (
 					guildId &&
-					channel?.isHidden?.() &&
+					this.isHidden(channel) &&
 					channel?.id !== Voice.getChannelId()
 				) {
 					res.props.render = () =>
@@ -501,7 +489,7 @@ export default (() => {
 				"fetchMessages",
 				(instance, args, res) => {
 					const [fetchConfig] = /** @type {[{channelId: string}]} */ (args);
-					if (ChannelStore.getChannel(fetchConfig.channelId)?.isHidden?.()) {
+					if (this.isHidden(ChannelStore.getChannel(fetchConfig.channelId))) {
 						return;
 					}
 
@@ -522,7 +510,7 @@ export default (() => {
 				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
 					const [instance] =
 						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!instance?.channel?.isHidden()) {
+					if (!this.isHidden(instance?.channel)) {
 						return res;
 					}
 
@@ -609,7 +597,7 @@ export default (() => {
 						/** @type {[SHCChannel, any, {locked: boolean}]} */ (args);
 					if (!opts) return;
 
-					if (channel?.isHidden?.() && opts.locked) {
+					if (this.isHidden(channel) && opts.locked) {
 						opts.locked = false;
 					}
 				});
@@ -638,11 +626,12 @@ export default (() => {
 					return res;
 				}
 
-				const HiddenCategoryChannel = new ChannelRecordBase({
+				const HiddenCategoryChannel = createChannelRecord({
 					guild_id: guild_id,
 					id: channelId,
 					name: "Hidden Channels",
 					type: DiscordConstants.ChannelTypes.GUILD_CATEGORY,
+					permission_overwrites: [],
 				});
 
 				return HiddenCategoryChannel;
@@ -663,11 +652,12 @@ export default (() => {
 					}
 
 					const hiddenCategoryId = `${guildId}_hidden`;
-					const HiddenCategoryChannel = new ChannelRecordBase({
+					const HiddenCategoryChannel = createChannelRecord({
 						guild_id: guildId,
 						id: hiddenCategoryId,
 						name: "Hidden Channels",
 						type: DiscordConstants.ChannelTypes.GUILD_CATEGORY,
+						permission_overwrites: [],
 					});
 
 					const GuildCategories =
@@ -853,6 +843,21 @@ export default (() => {
 			}
 		}
 
+		/**
+		 * @param {SHCChannel} [channel]
+		 * @returns {boolean}
+		 */
+		isHidden(channel) {
+			if (!channel) return false;
+
+			const { DiscordConstants } = require("./utils/modules").getModules();
+			const { DM, GROUP_DM } = DiscordConstants.ChannelTypes;
+
+			if ([DM, GROUP_DM].includes(channel.type)) return false;
+
+			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
+		}
+
 		sortChannels(category) {
 			if (!category || category.isCollapsed) return;
 
@@ -862,7 +867,7 @@ export default (() => {
 				return (
 					record.position +
 					(record.isGuildVocal() ? 1000 : 0) +
-					(record.isHidden() ? 10000 : 0)
+					(this.isHidden(record) ? 10000 : 0)
 				);
 			};
 
@@ -939,7 +944,7 @@ export default (() => {
 				ChannelStore.getMutableGuildChannelsForGuild(guildId);
 			const hiddenChannels = Object.values(guildChannels).filter(
 				(m) =>
-					m.isHidden() &&
+					this.isHidden(m) &&
 					m.type !== DiscordConstants.ChannelTypes.GUILD_CATEGORY,
 			);
 
