@@ -388,12 +388,16 @@ export default (() => {
 		}
 
 		isHiddenChannel(channel) {
+			// `PermissionStore.can` also accepts guilds, which have no channel type.
+			if (typeof channel?.type !== "number") return false;
+
 			const { DiscordConstants } = require("./utils/modules").getModules();
 			const { DM, GROUP_DM } = DiscordConstants.ChannelTypes;
 
-			if (!channel || [DM, GROUP_DM].includes(channel.type)) {
-				return false;
-			}
+			if ([DM, GROUP_DM].includes(channel.type)) return false;
+
+			// Skip Discord's top-level guide, browse, and role-selection entries.
+			if (["browse", "customize", "guide"].includes(channel.id)) return false;
 
 			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
 		}
