@@ -313,6 +313,17 @@ export default (() => {
 			this.rerenderChannels();
 		}
 
+		isHiddenChannel(channel) {
+			const { DiscordConstants } = require("./utils/modules").getModules();
+			const { DM, GROUP_DM } = DiscordConstants.ChannelTypes;
+
+			if (!channel || [DM, GROUP_DM].includes(channel.type)) {
+				return false;
+			}
+
+			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
+		}
+
 		/**
 		 * Temporary hotfix for Discord's 2026-02-private-channel-hiding experiment.
 		 * Keep this isolated so it can be removed once SHC has a better long-term path.
@@ -483,7 +494,7 @@ export default (() => {
 				// PermissionStoreActionHandler,
 				// ChannelListStoreActionHandler,
 				// container,
-				ChannelRecordBase,
+				createChannelRecord,
 				ChannelListStore,
 				iconItem,
 				actionIcon,
@@ -494,7 +505,7 @@ export default (() => {
 
 			// Check for needed modules
 			if (
-				!ChannelRecordBase ||
+				typeof createChannelRecord !== "function" ||
 				!DiscordConstants ||
 				!ChannelStore ||
 				!ChannelPermissionStore?.can ||
@@ -508,18 +519,6 @@ export default (() => {
 					},
 				);
 			}
-
-			Patcher.instead(
-				ChannelRecordBase.prototype,
-				"isHidden",
-				(unknownChannel) => {
-					const channel = /** @type {SHCChannel} */ (unknownChannel);
-					return (
-						![1, 3].includes(channel.type) &&
-						!this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel)
-					);
-				},
-			);
 
 			if (!ReadStateStore) {
 				this.api.UI.showToast(
@@ -537,7 +536,7 @@ export default (() => {
 					if (this.settings.MarkUnread) return res;
 
 					const [channel] = /** @type {[SHCChannel]} */ (args);
-					return channel?.isHidden()
+					return this.isHiddenChannel(channel)
 						? {
 								mentionCount: 0,
 								unread: false,
@@ -549,31 +548,31 @@ export default (() => {
 			Patcher.after(ReadStateStore, "getMentionCount", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				return this.isHiddenChannel(ChannelStore.getChannel(args[0])) ? 0 : res;
 			});
 
 			Patcher.after(ReadStateStore, "getUnreadCount", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return ChannelStore.getChannel(args[0])?.isHidden() ? 0 : res;
+				return this.isHiddenChannel(ChannelStore.getChannel(args[0])) ? 0 : res;
 			});
 
 			Patcher.after(ReadStateStore, "hasTrackedUnread", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHiddenChannel(ChannelStore.getChannel(args[0]));
 			});
 
 			Patcher.after(ReadStateStore, "hasUnread", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHiddenChannel(ChannelStore.getChannel(args[0]));
 			});
 
 			Patcher.after(ReadStateStore, "hasUnreadPins", (_, args, res) => {
 				if (this.settings.MarkUnread) return res;
 
-				return res && !ChannelStore.getChannel(args[0])?.isHidden();
+				return res && !this.isHiddenChannel(ChannelStore.getChannel(args[0]));
 			});
 
 			//* Make hidden channel visible
@@ -581,7 +580,7 @@ export default (() => {
 				const [permission, channel] = /** @type {[bigint, SHCChannel]} */ (
 					args
 				);
-				if (!channel?.isHidden?.()) return res;
+				if (!this.isHiddenChannel(channel)) return res;
 
 				if (permission === DiscordConstants.Permissions.VIEW_CHANNEL) {
 					return (
@@ -612,7 +611,7 @@ export default (() => {
 				const channelId = res.props?.computedMatch?.params?.channelId;
 				const guildId = res.props?.computedMatch?.params?.guildId;
 				const channel = ChannelStore?.getChannel(channelId);
-				const isHiddenChannel = channel?.isHidden?.();
+				const isHiddenChannel = this.isHiddenChannel(channel);
 				const isLockedVoiceChannel =
 					channel?.isGuildVocal?.() &&
 					!this.can(DiscordConstants.Permissions.CONNECT, channel);
@@ -648,7 +647,7 @@ export default (() => {
 				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
 					const [instance] =
 						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!instance?.channel?.isHidden()) {
+					if (!this.isHiddenChannel(instance?.channel)) {
 						return res;
 					}
 
@@ -731,7 +730,7 @@ export default (() => {
 
 					if (
 						!channel?.isGuildVocal?.() ||
-						channel?.isHidden?.() ||
+						this.isHiddenChannel(channel) ||
 						this.can(DiscordConstants.Permissions.CONNECT, channel)
 					) {
 						return res;
@@ -799,11 +798,12 @@ export default (() => {
 					return res;
 				}
 
-				const HiddenCategoryChannel = new ChannelRecordBase({
+				const HiddenCategoryChannel = createChannelRecord({
 					guild_id: guild_id,
 					id: channelId,
 					name: "Hidden Channels",
 					type: DiscordConstants.ChannelTypes.GUILD_CATEGORY,
+					permission_overwrites: [],
 				});
 
 				return HiddenCategoryChannel;
@@ -824,11 +824,12 @@ export default (() => {
 					}
 
 					const hiddenCategoryId = `${guildId}_hidden`;
-					const HiddenCategoryChannel = new ChannelRecordBase({
+					const HiddenCategoryChannel = createChannelRecord({
 						guild_id: guildId,
 						id: hiddenCategoryId,
 						name: "Hidden Channels",
 						type: DiscordConstants.ChannelTypes.GUILD_CATEGORY,
+						permission_overwrites: [],
 					});
 
 					const GuildCategories =
@@ -1023,7 +1024,7 @@ export default (() => {
 				return (
 					record.position +
 					(record.isGuildVocal() ? 1000 : 0) +
-					(record.isHidden() ? 10000 : 0)
+					(this.isHiddenChannel(record) ? 10000 : 0)
 				);
 			};
 
@@ -1100,7 +1101,7 @@ export default (() => {
 				ChannelStore.getMutableGuildChannelsForGuild(guildId);
 			const hiddenChannels = Object.values(guildChannels).filter(
 				(m) =>
-					m.isHidden() &&
+					this.isHiddenChannel(m) &&
 					m.type !== DiscordConstants.ChannelTypes.GUILD_CATEGORY,
 			);
 
