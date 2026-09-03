@@ -5,7 +5,7 @@
 	"scripts": {
 		"build": "webpack --progress --color"
 	},
-	"author": "JustOptimize (Oggetto)",
+	"author": "JustOptimize (Oggetto), XxUnkn0wnxX (AI)",
 	"license": "GPL-3.0-only",
 	"devDependencies": {
 		"@babel/core": "^7.29.0",

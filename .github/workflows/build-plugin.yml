@@ -1,21 +1,21 @@
 name: Build Plugin
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - ".github/workflows/build-plugin.yml"
+      - ".github/workflows/publish-nightly.yml"
       - "src/**"
-      - "bun.lock"
       - "package.json"
       - "webpack.config.js"
       - "jsconfig.json"
       - "assets/**"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-plugin-${{ github.ref }}
@@ -23,58 +23,155 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: actions/checkout@v7
         with:
-          bun-version: latest
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
 
       - name: Prepare BetterDiscord build target
         run: |
+          set -euo pipefail
           export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
           mkdir -p "$XDG_CONFIG_HOME/BetterDiscord/plugins"
           echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: corepack pnpm install
 
       - name: Build plugin
-        run: bun run build
+        run: corepack pnpm exec webpack --progress --color --env updateRepo="$GITHUB_REPOSITORY"
 
-      - name: Replace distributable in repo root
-        run: cp dist/ShowHiddenChannels.plugin.js ShowHiddenChannels.plugin.js
+      - name: Upload compiled plugin
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-plugin
+          path: dist/ShowHiddenChannels.plugin.js
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Commit updated plugin
+  prepare-release:
+    needs: build
+    if: >-
+      needs.build.result == 'success' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout triggering commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Download compiled plugin
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-plugin
+          path: ${{ runner.temp }}/compiled-plugin
+
+      - name: Validate and install compiled plugin
         run: |
-          if git diff --quiet -- ShowHiddenChannels.plugin.js; then
-            echo "No distributable changes to commit."
-            exit 0
+          set -euo pipefail
+          DOWNLOAD_DIR="${RUNNER_TEMP}/compiled-plugin"
+          PLUGIN_FILE="$DOWNLOAD_DIR/ShowHiddenChannels.plugin.js"
+
+          if [[ ! -f "$PLUGIN_FILE" ]]; then
+            echo "::error::compiled-plugin is missing ShowHiddenChannels.plugin.js."
+            exit 1
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ShowHiddenChannels.plugin.js
-          git commit -m "Build plugin"
-          git push origin main
+          mapfile -d '' -t ARTIFACT_FILES < <(find "$DOWNLOAD_DIR" -type f -print0)
+          if (( ${#ARTIFACT_FILES[@]} != 1 )); then
+            echo "::error::compiled-plugin must contain exactly one file: ShowHiddenChannels.plugin.js."
+            exit 1
+          fi
+          if [[ "${ARTIFACT_FILES[0]}" != "$PLUGIN_FILE" ]]; then
+            echo "::error::compiled-plugin contains an unexpected file."
+            exit 1
+          fi
 
-      - name: Refresh rolling fork release
-        env:
-          GH_TOKEN: ${{ github.token }}
+          cp -- "$PLUGIN_FILE" "ShowHiddenChannels.plugin.js"
+
+      - name: Commit generated plugin and push main
         run: |
-          TAG="Nightly-Fork"
-          FULL_SHA="$(git rev-parse HEAD)"
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
-          git push origin ":refs/tags/$TAG" || true
+          set -euo pipefail
 
-          gh release create "$TAG" ShowHiddenChannels.plugin.js \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$FULL_SHA" \
-            --title "Nightly-Fork" \
-            --notes "Auto-built from commit $FULL_SHA." \
-            --latest
+          if git diff --quiet -- "ShowHiddenChannels.plugin.js"; then
+            echo "No distributable changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- "ShowHiddenChannels.plugin.js"
+
+            mapfile -t STAGED_FILES < <(git diff --cached --name-only)
+            if (( ${#STAGED_FILES[@]} != 1 )) || [[ "${STAGED_FILES[0]}" != "ShowHiddenChannels.plugin.js" ]]; then
+              echo "::error::Only ShowHiddenChannels.plugin.js may be committed."
+              exit 1
+            fi
+
+            git commit -m "Build plugin"
+          fi
+
+          git push origin HEAD:main
+
+      - name: Determine release commit
+        id: release_sha
+        run: |
+          set -euo pipefail
+          RELEASE_SHA="$(git rev-parse --verify HEAD^{commit})"
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::The resulting HEAD is not a full 40-character commit SHA."
+            exit 1
+          fi
+          printf 'release_sha=%s\n' "$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Stage nightly release input
+        env:
+          RELEASE_SHA: ${{ steps.release_sha.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          INPUT_DIR="${RUNNER_TEMP}/nightly-release-input"
+          if [[ -e "$INPUT_DIR" ]]; then
+            echo "::error::The nightly release input directory already exists."
+            exit 1
+          fi
+          mkdir -p "$INPUT_DIR"
+          cp -- "ShowHiddenChannels.plugin.js" "$INPUT_DIR/ShowHiddenChannels.plugin.js"
+          printf '%s\n' "$RELEASE_SHA" > "$INPUT_DIR/release-sha.txt"
+
+          mapfile -t INPUT_FILES < <(find "$INPUT_DIR" -type f -print)
+          if (( ${#INPUT_FILES[@]} != 2 )); then
+            echo "::error::nightly-release-input must contain exactly the plugin and release SHA files."
+            exit 1
+          fi
+          if [[ ! -f "$INPUT_DIR/ShowHiddenChannels.plugin.js" || ! -f "$INPUT_DIR/release-sha.txt" ]]; then
+            echo "::error::nightly-release-input is missing an expected file."
+            exit 1
+          fi
+
+      - name: Upload nightly release input
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-release-input
+          path: ${{ runner.temp }}/nightly-release-input/
+          if-no-files-found: error

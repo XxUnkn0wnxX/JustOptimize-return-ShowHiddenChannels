@@ -1,0 +1,589 @@
+name: Publish Nightly Fork
+
+on:
+  workflow_run:
+    workflows:
+      - Build Plugin
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-nightly-fork
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+      github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Select source build run
+        id: source_run
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TRIGGERING_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            if [[ ! "$TRIGGERING_RUN_ID" =~ ^[0-9]+$ ]]; then
+              echo "::error::The triggering Build Plugin run ID is missing or invalid."
+              exit 1
+            fi
+            SOURCE_RUN_ID="$TRIGGERING_RUN_ID"
+          else
+            RUNS_JSON="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow "build-plugin.yml" \
+              --branch main \
+              --limit 1000 \
+              --json databaseId,event,headBranch,status,conclusion,createdAt)"
+            SOURCE_RUN_ID=""
+            while IFS= read -r candidate_run_id; do
+              [[ -n "$candidate_run_id" ]] || continue
+              ARTIFACTS_JSON="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$candidate_run_id/artifacts?per_page=100")"
+              MATCHING_COUNT="$(jq '[.artifacts[] | select(.name == "nightly-release-input" and .expired == false)] | length' <<< "$ARTIFACTS_JSON")"
+              if [[ "$MATCHING_COUNT" == "0" ]]; then
+                continue
+              fi
+              if [[ "$MATCHING_COUNT" != "1" ]]; then
+                echo "::error::Build Plugin run $candidate_run_id has an ambiguous nightly-release-input artifact set."
+                exit 1
+              fi
+              SOURCE_RUN_ID="$candidate_run_id"
+              break
+            done < <(jq -r '
+              [ .[]
+                | select(.headBranch == "main")
+                | select(.status == "completed" and .conclusion == "success")
+                | select(.event == "push" or .event == "workflow_dispatch")
+              ]
+              | sort_by(.createdAt)
+              | reverse
+              | .[].databaseId
+            ' <<< "$RUNS_JSON")
+
+            if [[ -z "$SOURCE_RUN_ID" ]]; then
+              echo "::error::No successful Build Plugin run on main has a downloadable nightly-release-input artifact."
+              exit 1
+            fi
+          fi
+
+          printf 'source_run_id=%s\n' "$SOURCE_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download nightly release input
+        env:
+          SOURCE_RUN_ID: ${{ steps.source_run.outputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          INPUT_DIR="${RUNNER_TEMP}/nightly-release-input"
+          mkdir -p "$INPUT_DIR"
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name nightly-release-input \
+            --dir "$INPUT_DIR"
+
+      - name: Validate release input
+        id: release_input
+        env:
+          SOURCE_RUN_ID: ${{ steps.source_run.outputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          INPUT_DIR="${RUNNER_TEMP}/nightly-release-input"
+          PLUGIN_FILE="$INPUT_DIR/ShowHiddenChannels.plugin.js"
+          SHA_FILE="$INPUT_DIR/release-sha.txt"
+
+          for required_file in "$PLUGIN_FILE" "$SHA_FILE"; do
+            if [[ ! -f "$required_file" ]]; then
+              echo "::error::The nightly-release-input artifact is missing $required_file."
+              exit 1
+            fi
+          done
+
+          mapfile -t INPUT_FILES < <(find "$INPUT_DIR" -type f -print)
+          if (( ${#INPUT_FILES[@]} != 2 )); then
+            echo "::error::The nightly-release-input artifact must contain exactly the plugin and release SHA files."
+            exit 1
+          fi
+
+          RELEASE_SHA="$(< "$SHA_FILE")"
+          RELEASE_SHA="${RELEASE_SHA//$'\r'/}"
+          RELEASE_SHA="${RELEASE_SHA//$'\n'/}"
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::release-sha.txt must contain one full 40-character commit SHA."
+            exit 1
+          fi
+
+          PLUGIN_VERSION="$(awk '$1 == "*" && $2 == "@version" { print $3; exit }' "$PLUGIN_FILE")"
+          if [[ ! "$PLUGIN_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "::error::Could not parse a dotted numeric @version from ShowHiddenChannels.plugin.js."
+            exit 1
+          fi
+
+          printf 'release_sha=%s\n' "$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          printf 'RELEASE_SHA=%s\n' "$RELEASE_SHA" >> "$GITHUB_ENV"
+          printf 'PLUGIN_FILE=%s\n' "$PLUGIN_FILE" >> "$GITHUB_ENV"
+          printf 'PLUGIN_VERSION=%s\n' "$PLUGIN_VERSION" >> "$GITHUB_ENV"
+
+      - name: Checkout exact release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.release_input.outputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Verify release commit on main
+        id: release_gate
+        run: |
+          set -euo pipefail
+          CHECKED_SHA="$(git rev-parse HEAD)"
+          if [[ "$CHECKED_SHA" != "$RELEASE_SHA" ]]; then
+            echo "::error::Checked out $CHECKED_SHA, expected $RELEASE_SHA."
+            exit 1
+          fi
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
+          REMOTE_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping stale build $RELEASE_SHA because current main is $REMOTE_MAIN_SHA."
+            exit 0
+          fi
+          if ! cmp -- "$PLUGIN_FILE" "ShowHiddenChannels.plugin.js"; then
+            echo "::error::The packaged plugin does not match the distributable committed at $RELEASE_SHA."
+            exit 1
+          fi
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate source release metadata
+        if: steps.release_gate.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          CONFIG_FILE="$GITHUB_WORKSPACE/src/config.json"
+          VERSION="$(jq -er '.version | select(type == "string")' "$CONFIG_FILE")"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "::error::src/config.json version must be dotted numeric (got $VERSION)."
+            exit 1
+          fi
+          if [[ "$PLUGIN_VERSION" != "$VERSION" ]]; then
+            echo "::error::Plugin @version $PLUGIN_VERSION does not match source version $VERSION."
+            exit 1
+          fi
+
+          if ! jq -e '
+            (.changelog | type) == "array" and (.changelog | length) > 0
+            and (.changelog[0] | type) == "object"
+            and (.changelog[0].title | type) == "string"
+            and (.changelog[0].items | type) == "array"
+            and (.changelog[0].items | length) > 0
+            and all(.changelog[0].items[]; ((type == "string") and ((gsub("[[:space:]]"; "") | length) > 0) and (contains("\n") | not) and (contains("\r") | not)))
+          ' "$CONFIG_FILE" >/dev/null; then
+            echo "::error::The first source changelog entry must have a title and one or more valid items."
+            exit 1
+          fi
+
+          CHANGELOG_TITLE="$(jq -er '.changelog[0].title | select(type == "string")' "$CONFIG_FILE")"
+          if [[ ! "$CHANGELOG_TITLE" =~ [^[:space:]] || "$CHANGELOG_TITLE" == *$'\n'* || "$CHANGELOG_TITLE" == *$'\r'* ]]; then
+            echo "::error::The first source changelog title must be a non-empty single-line string."
+            exit 1
+          fi
+          if [[ "$CHANGELOG_TITLE" != "v${VERSION} - "* ]]; then
+            echo "::error::The first source changelog title must begin with v${VERSION} - ."
+            exit 1
+          fi
+
+          printf 'VERSION=%s\n' "$VERSION" >> "$GITHUB_ENV"
+          printf 'CONFIG_FILE=%s\n' "$CONFIG_FILE" >> "$GITHUB_ENV"
+
+      - name: Prepare release notes
+        if: steps.release_gate.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          TAG="Nightly-Fork"
+          NOTES_FILE="${RUNNER_TEMP}/showhiddenchannels-nightly-notes.md"
+
+          if RELEASE_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body 2>/dev/null)"; then
+            RELEASE_EXISTS="true"
+            PREVIOUS_BODY="$(jq -r '.body // empty' <<< "$RELEASE_JSON")"
+          else
+            RELEASE_EXISTS="false"
+            PREVIOUS_BODY=""
+          fi
+
+          REMOTE_TAG_REFS="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          PREVIOUS_TAG_SHA="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<< "$REMOTE_TAG_REFS")"
+          if [[ -z "$PREVIOUS_TAG_SHA" ]]; then
+            PREVIOUS_TAG_SHA="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<< "$REMOTE_TAG_REFS")"
+          fi
+          if [[ -n "$PREVIOUS_TAG_SHA" && ! "$PREVIOUS_TAG_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::The existing Nightly-Fork tag did not resolve to one full commit SHA."
+            exit 1
+          fi
+          if [[ "$RELEASE_EXISTS" == "true" && -z "$PREVIOUS_TAG_SHA" ]]; then
+            echo "::error::The existing Nightly-Fork release has no resolvable remote tag to protect."
+            exit 1
+          fi
+
+          CHANGELOG_BASE=""
+          if [[ "$PREVIOUS_TAG_SHA" =~ ^[0-9a-fA-F]{40}$ && "${PREVIOUS_TAG_SHA,,}" != "${RELEASE_SHA,,}" ]]; then
+            CHANGELOG_BASE="$PREVIOUS_TAG_SHA"
+          elif [[ "${PREVIOUS_TAG_SHA,,}" == "${RELEASE_SHA,,}" ]]; then
+            MARKER_BASE="$(printf '%s\n' "$PREVIOUS_BODY" | sed -nE 's/^[[:space:]]*<!--[[:space:]]*nightly-base:[[:space:]]*([0-9a-fA-F]{40})[[:space:]]*-->[[:space:]]*$/\1/p' | head -n 1)"
+            if [[ "$MARKER_BASE" =~ ^[0-9a-fA-F]{40}$ && "${MARKER_BASE,,}" != "${RELEASE_SHA,,}" ]]; then
+              CHANGELOG_BASE="$MARKER_BASE"
+            else
+              EXISTING_COMPARE_BASE="$(printf '%s\n' "$PREVIOUS_BODY" | sed -nE "s#^\\*\\*Full Changelog\\*\\*: https://github.com/${GITHUB_REPOSITORY}/compare/([0-9a-fA-F]{40})\\.\\.\\.${RELEASE_SHA}[[:space:]]*$#\\1#p" | head -n 1)"
+              if [[ "$EXISTING_COMPARE_BASE" =~ ^[0-9a-fA-F]{40}$ && "${EXISTING_COMPARE_BASE,,}" != "${RELEASE_SHA,,}" ]]; then
+                CHANGELOG_BASE="$EXISTING_COMPARE_BASE"
+              fi
+            fi
+          fi
+
+          if [[ -n "$CHANGELOG_BASE" ]]; then
+            FULL_CHANGELOG_LINE="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$CHANGELOG_BASE...$RELEASE_SHA"
+          else
+            FULL_CHANGELOG_LINE="**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/commit/$RELEASE_SHA"
+          fi
+
+          {
+            printf '%s\n\n' "$FULL_CHANGELOG_LINE"
+            jq -r '
+              "## " + .changelog[0].title,
+              "",
+              (.changelog[0].items[] | "- " + .)
+            ' "$CONFIG_FILE"
+            if [[ -n "$CHANGELOG_BASE" ]]; then
+              printf '\n<!-- nightly-base: %s -->\n' "$CHANGELOG_BASE"
+            fi
+          } > "$NOTES_FILE"
+
+          printf 'TAG=%s\n' "$TAG" >> "$GITHUB_ENV"
+          printf 'NOTES_FILE=%s\n' "$NOTES_FILE" >> "$GITHUB_ENV"
+          printf 'RELEASE_EXISTS=%s\n' "$RELEASE_EXISTS" >> "$GITHUB_ENV"
+          printf 'PREVIOUS_TAG_SHA=%s\n' "$PREVIOUS_TAG_SHA" >> "$GITHUB_ENV"
+
+      - name: Refresh rolling release
+        if: steps.release_gate.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
+          REMOTE_MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$RELEASE_SHA" != "$REMOTE_MAIN_SHA" ]]; then
+            echo "::notice::Skipping stale build $RELEASE_SHA because current main advanced to $REMOTE_MAIN_SHA."
+            exit 0
+          fi
+
+          remote_tag_sha() {
+            local tag_refs peeled direct
+            if ! tag_refs="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")"; then
+              return 1
+            fi
+            peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<< "$tag_refs")"
+            if [[ "$peeled" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              printf '%s\n' "$peeled"
+              return 0
+            fi
+            direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<< "$tag_refs")"
+            if [[ ! "$direct" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              return 1
+            fi
+            printf '%s\n' "$direct"
+          }
+
+          force_tag_to_sha() {
+            local target_sha="$1"
+            local verified_sha
+            if ! git push --force origin "$target_sha:refs/tags/$TAG"; then
+              return 1
+            fi
+            if ! verified_sha="$(remote_tag_sha)"; then
+              return 1
+            fi
+            if [[ "${verified_sha,,}" != "${target_sha,,}" ]]; then
+              echo "::error::Remote $TAG resolved to $verified_sha, expected $target_sha."
+              return 1
+            fi
+          }
+
+          RELEASE_API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+
+          if [[ "$RELEASE_EXISTS" == "true" ]]; then
+            BACKUP_DIR="${RUNNER_TEMP}/nightly-release-backup"
+            mkdir -p "$BACKUP_DIR"
+            BACKUP_PLUGIN="$BACKUP_DIR/ShowHiddenChannels.plugin.js"
+            if ! gh release download "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "ShowHiddenChannels.plugin.js" \
+              --dir "$BACKUP_DIR"; then
+              echo "::error::Could not back up the current ShowHiddenChannels.plugin.js before mutation."
+              exit 1
+            fi
+            if [[ ! -s "$BACKUP_PLUGIN" ]]; then
+              echo "::error::The current ShowHiddenChannels.plugin.js backup is missing or empty; refusing to mutate the release."
+              exit 1
+            fi
+
+            restore_previous_release() {
+              local reason="$1"
+              local plugin_restored="false"
+              local tag_restored="false"
+
+              if gh release upload "$TAG" "$BACKUP_PLUGIN" \
+                --repo "$GITHUB_REPOSITORY" \
+                --clobber; then
+                plugin_restored="true"
+              else
+                echo "::error::Failed to restore the backed-up ShowHiddenChannels.plugin.js."
+              fi
+
+              if force_tag_to_sha "$PREVIOUS_TAG_SHA"; then
+                tag_restored="true"
+              else
+                echo "::error::Failed to restore remote $TAG to $PREVIOUS_TAG_SHA."
+              fi
+
+              if [[ "$plugin_restored" == "true" && "$tag_restored" == "true" ]]; then
+                echo "::error::$reason The previous plugin asset and tag were restored."
+              else
+                echo "::error::$reason Rollback was incomplete; the release may require manual repair."
+              fi
+              return 1
+            }
+
+            ROLLBACK_REASON="Refreshing the existing Nightly-Fork release failed."
+            rollback_existing_release() {
+              local original_status="$?"
+              trap - EXIT
+              set +e
+
+              if [[ "$original_status" != "0" ]]; then
+                restore_previous_release "$ROLLBACK_REASON"
+              fi
+              exit "$original_status"
+            }
+            trap rollback_existing_release EXIT
+
+            if gh release upload "$TAG" "$PLUGIN_FILE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber; then
+              :
+            else
+              mutation_status="$?"
+              ROLLBACK_REASON="Uploading the new plugin failed."
+              exit "$mutation_status"
+            fi
+
+            if force_tag_to_sha "$RELEASE_SHA"; then
+              :
+            else
+              mutation_status="$?"
+              ROLLBACK_REASON="Moving $TAG to $RELEASE_SHA failed or could not be verified."
+              exit "$mutation_status"
+            fi
+          else
+            cleanup_new_draft() {
+              local original_status=$?
+              local cleanup_ok="true"
+              local current_tag_sha
+              local release_json
+              local release_id
+              local release_tag
+              local release_draft
+              local release_target
+              local release_http_status
+              trap - EXIT
+              set +e
+
+              if [[ "$original_status" == "0" ]]; then
+                exit "$original_status"
+              fi
+
+              echo "::error::Release publication failed; checking for an ambiguously created Nightly-Fork release."
+              lookup_release_http_status() {
+                local response
+                response="$(gh api --include --silent "$RELEASE_API" 2>/dev/null)" || true
+                printf '%s\n' "$response" |
+                  sed -nE 's/^HTTP\/[0-9.]+[[:space:]]+([0-9]{3})([[:space:]].*)?$/\1/p' |
+                  tail -n 1
+              }
+
+              release_http_status="$(lookup_release_http_status)"
+              case "$release_http_status" in
+                200)
+                  if release_json="$(gh api "$RELEASE_API" 2>/dev/null)"; then
+                    release_id="$(jq -er '.id | numbers' <<< "$release_json")" || release_id=""
+                    release_tag="$(jq -er '.tag_name | strings' <<< "$release_json")" || release_tag=""
+                    release_draft="$(jq -er '.draft | booleans' <<< "$release_json")" || release_draft=""
+                    release_target="$(jq -er '.target_commitish | strings' <<< "$release_json")" || release_target=""
+
+                    if [[ "$release_id" =~ ^[0-9]+$ &&
+                          "$release_tag" == "$TAG" &&
+                          "$release_draft" == "true" &&
+                          "${release_target,,}" == "${RELEASE_SHA,,}" ]]; then
+                      if ! gh api --method DELETE --silent \
+                        "repos/$GITHUB_REPOSITORY/releases/$release_id"; then
+                        echo "::error::Failed to delete the newly created Nightly-Fork draft release $release_id."
+                        cleanup_ok="false"
+                      else
+                        release_http_status="$(lookup_release_http_status)"
+                        if [[ "$release_http_status" == "404" ]]; then
+                          echo "::notice::The newly created Nightly-Fork draft release was deleted and verified gone."
+                        else
+                          echo "::error::The newly created Nightly-Fork draft release could not be verified gone; API lookup returned HTTP ${release_http_status:-unknown}."
+                          cleanup_ok="false"
+                        fi
+                      fi
+                    elif [[ ! "$release_id" =~ ^[0-9]+$ ]]; then
+                      echo "::error::Refusing to delete the ambiguous Nightly-Fork release because its API ID is not numeric."
+                      cleanup_ok="false"
+                    else
+                      echo "::error::Refusing to delete the ambiguous Nightly-Fork release because it is not the new draft for $RELEASE_SHA."
+                      cleanup_ok="false"
+                    fi
+                  else
+                    echo "::error::Failed to fetch the Nightly-Fork release JSON after an HTTP 200 during ambiguous-success cleanup."
+                    cleanup_ok="false"
+                  fi
+                  ;;
+                404)
+                  echo "::notice::No Nightly-Fork release was found during ambiguous-success cleanup (HTTP 404)."
+                  ;;
+                "")
+                  echo "::error::Could not verify the Nightly-Fork release API lookup HTTP status during ambiguous-success cleanup."
+                  cleanup_ok="false"
+                  ;;
+                *)
+                  echo "::error::The Nightly-Fork release API lookup returned unexpected HTTP status $release_http_status during ambiguous-success cleanup."
+                  cleanup_ok="false"
+                  ;;
+              esac
+
+              if [[ "$PREVIOUS_TAG_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                if ! git push --force origin "$PREVIOUS_TAG_SHA:refs/tags/$TAG"; then
+                  echo "::error::Failed to restore Nightly-Fork to the previous tag target $PREVIOUS_TAG_SHA."
+                  cleanup_ok="false"
+                else
+                  current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" 2>/dev/null | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+                  if [[ -z "$current_tag_sha" ]]; then
+                    current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" 2>/dev/null | awk '$2 !~ /\^\{\}$/ { print $1; exit }')"
+                  fi
+                  if [[ "${current_tag_sha,,}" != "${PREVIOUS_TAG_SHA,,}" ]]; then
+                    echo "::error::Nightly-Fork did not verify at the previous tag target $PREVIOUS_TAG_SHA after cleanup."
+                    cleanup_ok="false"
+                  fi
+                fi
+              else
+                current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" 2>/dev/null | awk '$2 ~ /\^\{\}$/ { print $1; exit }')"
+                if [[ -z "$current_tag_sha" ]]; then
+                  current_tag_sha="$(git ls-remote origin "refs/tags/$TAG" 2>/dev/null | awk '$2 !~ /\^\{\}$/ { print $1; exit }')"
+                fi
+                if [[ "${current_tag_sha,,}" == "${RELEASE_SHA,,}" ]]; then
+                  if ! git push origin ":refs/tags/$TAG"; then
+                    echo "::error::Failed to delete the newly created Nightly-Fork tag."
+                    cleanup_ok="false"
+                  elif git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+                    echo "::error::The newly created Nightly-Fork tag still exists after cleanup."
+                    cleanup_ok="false"
+                  fi
+                elif [[ -z "$current_tag_sha" ]]; then
+                  echo "::notice::Nightly-Fork tag was already absent during cleanup."
+                else
+                  echo "::error::Refusing to delete Nightly-Fork because its current target $current_tag_sha is not the newly created release $RELEASE_SHA."
+                  cleanup_ok="false"
+                fi
+              fi
+
+              if [[ "$cleanup_ok" == "true" ]]; then
+                echo "::error::Nightly-Fork cleanup completed; preserving original failure status $original_status."
+              else
+                echo "::error::Nightly-Fork cleanup was incomplete; manual repair may be required. Preserving original failure status $original_status."
+              fi
+              exit "$original_status"
+            }
+            trap cleanup_new_draft EXIT
+
+            if force_tag_to_sha "$RELEASE_SHA"; then
+              :
+            else
+              mutation_status="$?"
+              echo "::error::Could not force $TAG to the release commit $RELEASE_SHA before creating the release."
+              exit "$mutation_status"
+            fi
+            VERIFIED_TAG_SHA="$(remote_tag_sha)"
+            if [[ "${VERIFIED_TAG_SHA,,}" != "${RELEASE_SHA,,}" ]]; then
+              echo "::error::Remote $TAG resolved to $VERIFIED_TAG_SHA, expected $RELEASE_SHA before release creation."
+              exit 1
+            fi
+
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --target "$VERIFIED_TAG_SHA" \
+              --title "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              --draft
+            gh release upload "$TAG" "$PLUGIN_FILE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          fi
+
+          release_assets() {
+            local release_id="$1"
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+              | jq -c 'add // []'
+          }
+
+          RELEASE_JSON="$(gh api "$RELEASE_API")"
+          RELEASE_ID="$(jq -er '.id | numbers' <<< "$RELEASE_JSON")"
+          if [[ ! "$RELEASE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::The rolling release API returned an invalid release ID."
+            exit 1
+          fi
+
+          ASSETS_JSON="$(release_assets "$RELEASE_ID")"
+          mapfile -t NON_PLUGIN_ASSET_IDS < <(
+            jq -r '.[] | select(.name != "ShowHiddenChannels.plugin.js") | .id' <<< "$ASSETS_JSON"
+          )
+          for asset_id in "${NON_PLUGIN_ASSET_IDS[@]}"; do
+            [[ -n "$asset_id" ]] || continue
+            if [[ ! "$asset_id" =~ ^[0-9]+$ ]]; then
+              echo "::error::The rolling release API returned an invalid asset ID."
+              exit 1
+            fi
+            gh api --method DELETE --silent \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+          done
+
+          ASSETS_JSON="$(release_assets "$RELEASE_ID")"
+          ASSET_COUNT="$(jq -er 'length' <<< "$ASSETS_JSON")"
+          PLUGIN_ASSET_COUNT="$(jq -er '[.[] | select(.name == "ShowHiddenChannels.plugin.js")] | length' <<< "$ASSETS_JSON")"
+          NON_EMPTY_PLUGIN_COUNT="$(jq -er '[.[] | select(.name == "ShowHiddenChannels.plugin.js" and (.size | type) == "number" and .size > 0)] | length' <<< "$ASSETS_JSON")"
+
+          if [[ "$ASSET_COUNT" != "1" || "$PLUGIN_ASSET_COUNT" != "1" || "$NON_EMPTY_PLUGIN_COUNT" != "1" ]]; then
+            echo "::error::The rolling release must contain exactly one non-empty explicit asset named ShowHiddenChannels.plugin.js."
+            jq -c '.' <<< "$ASSETS_JSON"
+            exit 1
+          fi
+
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "v${VERSION} - Nightly-Fork" \
+            --notes-file "$NOTES_FILE" \
+            --target "$RELEASE_SHA" \
+            --draft=false \
+            --prerelease=false \
+            --latest
+          trap - EXIT

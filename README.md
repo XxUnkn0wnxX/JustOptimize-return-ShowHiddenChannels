@@ -15,7 +15,7 @@ Discord is working on an experimental feature that should hide private channels 
 
 ## How to Install
 
--   Got to the [releases page](https://github.com/JustOptimize/ShowHiddenChannels/releases/) of this repository.
+-   Go to the [releases page](https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/releases/tag/Nightly-Fork) of this repository.
 -   Download the latest version of the plugin by clicking on the `ShowHiddenChannels.plugin.js` file.
 -   Move the downloaded `ShowHiddenChannels.plugin.js` file into your BetterDiscord plugins folder.
 -   Enable the ShowHiddenChannels plugin.
@@ -24,13 +24,24 @@ Discord is working on an experimental feature that should hide private channels 
 
 In addition, you can also use the [PermissionsViewer](https://github.com/rauenzi/BetterDiscordAddons/tree/master/Plugins/PermissionsViewer) plugin by [@rauenzi](https://github.com/rauenzi/) to see the channel permissions/access.
 
+## Building
+
+Install dependencies and build the plugin with:
+
+```sh
+corepack pnpm install
+corepack pnpm exec webpack --progress --color
+```
+
+A local build resolves the GitHub repository from the checkout's `origin`. To override it, pass `--env updateRepo=owner/repo`. GitHub Actions supplies its workflow repository automatically; the original [JustOptimize/ShowHiddenChannels](https://github.com/JustOptimize/ShowHiddenChannels) repository remains the fallback. The resolved repository is used for the generated `@source`, `@updateUrl`, and stable self-update endpoint. Fork builds publish to the rolling `Nightly-Fork` release; prereleases are not used.
+
 ## Preview
 
 ![image](https://user-images.githubusercontent.com/54294419/225766894-48d40546-ed7a-4794-888f-f0aafba26100.png)
 
 ## Changelog
 
-You can see all the changes made to the plugin in the [commit history](https://github.com/JustOptimize/ShowHiddenChannels/commits/main) of this repository.
+You can see all the changes made to the plugin in the [commit history](https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/commits/main) of this repository.
 
 ## How can I support this project?
 

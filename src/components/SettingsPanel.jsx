@@ -245,14 +245,6 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 					note="Check for updates on startup."
 				/>
 				<Switch
-					value={settings.usePreRelease}
-					onChange={(i) => {
-						onSettingsChange("usePreRelease", i);
-					}}
-					name="Use Pre-release Versions"
-					note="If enabled, you will receive pre-release versions."
-				/>
-				<Switch
 					value={settings.debugMode}
 					onChange={(i) => {
 						Logger.isDebugging = true;

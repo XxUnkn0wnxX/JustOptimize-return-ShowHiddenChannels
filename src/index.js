@@ -9,17 +9,20 @@ const config = {
 			{
 				name: "JustOptimize (Oggetto)",
 			},
+			{
+				name: "XxUnkn0wnxX (AI)",
+			},
 		],
 		description:
 			"A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
 		version: __VERSION__,
-		github: "https://github.com/JustOptimize/ShowHiddenChannels",
+		github: `https://github.com/${__GITHUB_REPOSITORY__}/tree/main`,
 	},
 
 	changelog: __CHANGELOG__,
 
 	main: "ShowHiddenChannels.plugin.js",
-	github_short: "JustOptimize/ShowHiddenChannels",
+	github_short: __GITHUB_REPOSITORY__,
 };
 
 export default (() => {
@@ -28,6 +31,49 @@ export default (() => {
 	const PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID =
 		"2026-02-private-channel-hiding";
 	const PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT = -1;
+	const UPSTREAM_REPOSITORY = "JustOptimize/ShowHiddenChannels";
+	const ROLLING_RELEASE_TAG = "Nightly-Fork";
+	const isForkBuild = config.github_short !== UPSTREAM_REPOSITORY;
+	const releaseApiUrl = isForkBuild
+		? `https://api.github.com/repos/${config.github_short}/releases/tags/${ROLLING_RELEASE_TAG}`
+		: `https://api.github.com/repos/${UPSTREAM_REPOSITORY}/releases/latest`;
+	const UPDATE_FETCH_OPTIONS = {
+		timeout: 15000,
+		maxRedirects: 20,
+		headers: {
+			"User-Agent": `${config.info.name}/${config.info.version}`,
+		},
+	};
+	const RELEASE_FETCH_OPTIONS = {
+		...UPDATE_FETCH_OPTIONS,
+		headers: {
+			...UPDATE_FETCH_OPTIONS.headers,
+			Accept: "application/vnd.github+json",
+			"X-GitHub-Api-Version": "2022-11-28",
+		},
+	};
+	const PLUGIN_VERSION_PATTERN = /^\d+(?:\.\d+)*$/;
+
+	const parsePluginHeader = (content) => {
+		if (typeof content !== "string" || !content) return null;
+
+		const header = content.match(/^\s*\/\*\*[\s\S]*?\*\//)?.[0];
+		const name = header?.match(
+			/^\s*\*\s*@name\s+([^\r\n]+?)\s*$/m,
+		)?.[1];
+		const version = header?.match(
+			/^\s*\*\s*@version\s+([^\r\n]+?)\s*$/m,
+		)?.[1];
+
+		if (
+			name !== config.info.name ||
+			!PLUGIN_VERSION_PATTERN.test(version ?? "")
+		) {
+			return null;
+		}
+
+		return { name, version };
+	};
 
 	const defaultSettings = {
 		hiddenChannelIcon: "lock",
@@ -37,7 +83,6 @@ export default (() => {
 		MarkUnread: false,
 
 		checkForUpdates: true,
-		usePreRelease: false,
 
 		shouldShowEmptyCategory: false,
 		debugMode: false,
@@ -65,31 +110,40 @@ export default (() => {
 
 			this.collapsed = {};
 			this.processContextMenu = this?.processContextMenu?.bind(this);
-			this.settings = Object.assign(
-				{},
-				defaultSettings,
-				this.api.Data.load("settings"),
+			const savedSettings = { ...(this.api.Data.load("settings") ?? {}) };
+			const hasLegacyPreRelease = Object.hasOwn(
+				savedSettings,
+				"usePreRelease",
 			);
+			delete savedSettings.usePreRelease;
+			this.settings = Object.assign({}, defaultSettings, savedSettings);
+			if (hasLegacyPreRelease) {
+				try {
+					this.api.Data.save("settings", this.settings);
+				} catch (error) {
+					console.warn("[ShowHiddenChannels] Failed to migrate legacy settings.", error);
+				}
+			}
 		}
 
 		semverGt(a, b) {
 			const parse = (v) => {
-				const [base, pre] = v.split("-pre");
-				return {
-					parts: base.split(".").map(Number),
-					pre: pre !== undefined ? Number(pre) : null,
-				};
+				if (typeof v !== "string" || !/^\d+(?:\.\d+)*$/.test(v)) {
+					return null;
+				}
+
+				return v.split(".").map(Number);
 			};
 			const av = parse(a);
 			const bv = parse(b);
-			for (let i = 0; i < Math.max(av.parts.length, bv.parts.length); i++) {
-				const diff = (av.parts[i] ?? 0) - (bv.parts[i] ?? 0);
+			if (!av || !bv) return false;
+
+			for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+				const diff = (av[i] ?? 0) - (bv[i] ?? 0);
 				if (diff !== 0) return diff > 0;
 			}
-			// stable > pre-release; higher pre number wins between two pre-releases
-			if (av.pre === null && bv.pre !== null) return true;
-			if (av.pre !== null && bv.pre === null) return false;
-			return av.pre !== null && av.pre > bv.pre;
+
+			return false;
 		}
 
 		async checkForUpdates() {
@@ -99,53 +153,51 @@ export default (() => {
 				`Checking for updates, current version: ${config.info.version}`,
 			);
 
-			const releases_raw = await fetch(
-				`https://api.github.com/repos/${config.github_short}/releases`,
-			);
-			if (!releases_raw?.ok) {
-				return this.api.UI.showToast(
+			const failedCheck = (source, detail) => {
+				let reason = "Unknown error";
+				if (typeof detail === "number") reason = `HTTP ${detail}`;
+				else if (detail instanceof Error) reason = detail.message || detail.name;
+				else if (typeof detail === "string" && detail) reason = detail;
+
+				Logger.warn(`Failed to check for updates (${source}): ${reason}`);
+				this.api.UI.showToast(
 					"(ShowHiddenChannels) Failed to check for updates.",
 					{
 						type: "error",
 					},
 				);
-			}
+			};
 
-			let releases = await releases_raw.json();
-			if (!releases?.length) {
-				return this.api.UI.showToast(
-					"(ShowHiddenChannels) Failed to check for updates.",
-					{
-						type: "error",
-					},
+			let release;
+			try {
+				const releaseResponse = await this.api.Net.fetch(
+					releaseApiUrl,
+					RELEASE_FETCH_OPTIONS,
 				);
+				if (!releaseResponse?.ok) {
+					return failedCheck("release API", releaseResponse?.status);
+				}
+
+				release = await releaseResponse.json();
+			} catch (error) {
+				return failedCheck("release API", error);
 			}
 
-			// Remove releases that do not have in the assets a file named ShowHiddenChannels.plugin.js
-			releases = releases.filter((m) =>
-				m.assets.some((n) => n.name === config.main),
-			);
+			const pluginAsset = Array.isArray(release?.assets)
+				? release.assets.find(
+						(asset) =>
+							asset?.name === config.main &&
+							typeof asset.browser_download_url === "string" &&
+							asset.browser_download_url.length > 0,
+					)
+				: undefined;
 
-			const latestStable = releases
-				.find((m) => !m.prerelease)
-				?.tag_name?.replace("v", "");
-			const latestPreRelease = releases
-				.find((m) => m.prerelease)
-				?.tag_name?.replace("v", "");
-			const latestRelease =
-				this.settings.usePreRelease && latestPreRelease && latestStable
-					? this.semverGt(latestPreRelease, latestStable)
-						? latestPreRelease
-						: latestStable
-					: this.settings.usePreRelease && latestPreRelease
-						? latestPreRelease
-						: latestStable;
-
-			Logger.debug(
-				`Latest version: ${latestRelease}, pre-release: ${!!this.settings.usePreRelease}`,
-			);
-
-			if (!latestRelease) {
+			if (
+				release?.draft !== false ||
+				release?.prerelease !== false ||
+				(isForkBuild && release?.tag_name !== ROLLING_RELEASE_TAG) ||
+				!pluginAsset
+			) {
 				this.api.UI.alert(
 					config.info.name,
 					"Failed to check for updates, version not found.",
@@ -154,30 +206,53 @@ export default (() => {
 				return Logger.err("Failed to check for updates, version not found.");
 			}
 
-			if (!this.semverGt(latestRelease, config.info.version)) {
+			let SHCContent;
+			try {
+				const pluginResponse = await this.api.Net.fetch(
+					pluginAsset.browser_download_url,
+					UPDATE_FETCH_OPTIONS,
+				);
+				if (!pluginResponse?.ok) {
+					return failedCheck("plugin asset", pluginResponse?.status);
+				}
+
+				SHCContent = await pluginResponse.text();
+			} catch (error) {
+				return failedCheck("plugin asset", error);
+			}
+
+			const pluginMetadata = parsePluginHeader(SHCContent);
+			if (!pluginMetadata) {
+				this.api.UI.alert(
+					config.info.name,
+					"Failed to check for updates, plugin metadata not found.",
+				);
+
+				return Logger.err(
+					"Failed to check for updates, plugin metadata not found.",
+				);
+			}
+
+			const releaseVersion = pluginMetadata.version;
+			Logger.debug(`Latest plugin version: ${releaseVersion}`);
+
+			if (!this.semverGt(releaseVersion, config.info.version)) {
 				return Logger.info("No updates found.");
 			}
 
+			const releaseTitle = isForkBuild
+				? `v${releaseVersion} - ${ROLLING_RELEASE_TAG}`
+				: `v${releaseVersion}`;
 			this.api.UI.showConfirmationModal(
 				"Update available",
-				`ShowHiddenChannels has an update available. Would you like to update to version ${latestRelease}?`,
+				`ShowHiddenChannels has an update available. Would you like to update to ${releaseTitle}?`,
 				{
 					confirmText: "Update",
 					cancelText: "Cancel",
 					danger: false,
 
 					onConfirm: async () => {
-						const SHCContent = await this.api.Net.fetch(
-							`https://github.com/JustOptimize/ShowHiddenChannels/releases/download/v${latestRelease}/${config.main}`,
-						)
-							.then((res) => res.text())
-							.catch(() => {
-								this.api.UI.showToast("Failed to fetch the latest version.", {
-									type: "error",
-								});
-							});
-
-						this.proceedWithUpdate(SHCContent, latestRelease);
+						await this.proceedWithUpdate(SHCContent, releaseVersion);
 					},
 
 					onCancel: () => {
@@ -196,15 +271,17 @@ export default (() => {
 				`Update confirmed by the user, updating to version ${version}`,
 			);
 
-			function failed() {
+			const failed = () => {
 				this.api.UI.showToast("(ShowHiddenChannels) Failed to update.", {
 					type: "error",
 				});
-			}
+			};
 
-			if (!SHCContent) return failed();
+			if (typeof SHCContent !== "string" || !SHCContent) return failed();
 
-			if (!SHCContent.match(/(?<=version: ").*(?=")/)) {
+			const pluginMetadata = parsePluginHeader(SHCContent);
+
+			if (!pluginMetadata || pluginMetadata.version !== version) {
 				return failed();
 			}
 
@@ -212,12 +289,9 @@ export default (() => {
 				const fs = RuntimeRequire("fs");
 				const path = RuntimeRequire("path");
 
-				await fs.writeFile(
+				await fs.promises.writeFile(
 					path.join(this.api.Plugins.folder, config.main),
 					SHCContent,
-					(err) => {
-						if (err) return failed();
-					},
 				);
 
 				this.api.UI.showToast(
