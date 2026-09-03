@@ -100,10 +100,11 @@ Key commits:
 `develop` and `main` intentionally cannot share the same tree or tip commit:
 the root plugin is absent from `develop` and present on `main`. Promotion must
 record real merge ancestry while retaining the generated plugin on `main`.
-After Actions commits a fresh build, merge that release ancestry back into
-`develop` while keeping the root plugin absent. Verify source parity between
-the two branches by excluding only `ShowHiddenChannels.plugin.js`; never force
-the branches to identical SHAs.
+After Actions commits a fresh build, fast-forward only local `main` from
+`origin/main`; do not merge that generated-artifact commit back into `develop`,
+which already contains the source changes. Verify source and documentation
+parity between the branches by excluding only `ShowHiddenChannels.plugin.js`,
+and never force the branches to identical SHAs.
 
 ### Private-channel-hiding hotfix
 
