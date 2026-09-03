@@ -42,11 +42,3 @@ A local build resolves the GitHub repository from the checkout's `origin`. To ov
 ## Changelog
 
 You can see all the changes made to the plugin in the [commit history](https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/commits/main) of this repository.
-
-## How can I support this project?
-
-You can support me by following me on GitHub, starring this repository, forking it, sharing it, and/or tipping me using the button below:
-
-<a href='https://ko-fi.com/Z8Z2GV3K4'>
-    <img style='height:40px;' src='https://storage.ko-fi.com/cdn/kofi5.png?v=3' alt='Buy Me a Coffee'/>
-</a>
