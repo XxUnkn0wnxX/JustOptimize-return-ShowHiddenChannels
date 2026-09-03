@@ -404,7 +404,7 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
     style: {
       marginTop: 8
     }
-  }, isLockedVoiceChannel ? "You cannot connect to this channel." : "You cannot see the contents of this channel.", " ", !isLockedVoiceChannel && channel.topic && channel.type !== 15 && "However, you may see its topic."), channel.topic && channel.type !== 15 && (ChannelUtils?.renderTopic(channel, guild) || "ChannelUtils module is missing, topic won't be shown."), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
+  }, isLockedVoiceChannel ? "You cannot connect to this channel." : "You cannot see the contents of this channel.", " ", !isLockedVoiceChannel && channel.topic && channel.type !== 15 && "However, you may see its topic."), channel.topic && channel.type !== 15 && (ChannelUtils?.renderTopic?.(channel, guild) || "ChannelUtils module is missing, topic won't be shown."), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14,
     style: {
@@ -1031,7 +1031,7 @@ function getModules() {
 			renderTopic: WebpackModules.Filters.byStrings("GROUP_DM:return null!="),
 		}) ?? {};
 	if (!ChannelUtils?.renderTopic) {
-		Logger.debug("Failed to load ChannelUtils", ChannelUtils);
+		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
 	}
 
 	const ProfileActions = WebpackModules.getMangled(
@@ -1607,12 +1607,16 @@ const config = {
 		}
 
 		isHiddenChannel(channel) {
+			// `PermissionStore.can` also accepts guilds, which have no channel type.
+			if (typeof channel?.type !== "number") return false;
+
 			const { DiscordConstants } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 			const { DM, GROUP_DM } = DiscordConstants.ChannelTypes;
 
-			if (!channel || [DM, GROUP_DM].includes(channel.type)) {
-				return false;
-			}
+			if ([DM, GROUP_DM].includes(channel.type)) return false;
+
+			// Skip Discord's top-level guide, browse, and role-selection entries.
+			if (["browse", "customize", "guide"].includes(channel.id)) return false;
 
 			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
 		}
