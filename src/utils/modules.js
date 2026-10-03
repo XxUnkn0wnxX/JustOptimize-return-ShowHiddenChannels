@@ -1,5 +1,7 @@
 // @ts-check
 
+import { getStoreActionHandler } from "./dispatcher";
+
 export const Logger = {
 	isDebugging: false,
 	_log: (type, color, ...x) => {
@@ -133,21 +135,21 @@ export function getModules() {
 		Logger.err("Failed to load ChannelPermissionStore", ChannelPermissionStore);
 	}
 
-	const fluxDispatcherHandlers = WebpackModules.getByKeys(
-		"dispatch",
-		"subscribe",
-		{ searchExports: true },
-	)?._actionHandlers._dependencyGraph;
+	const fluxDispatcher = WebpackModules.getByKeys("dispatch", "subscribe", {
+		searchExports: true,
+	});
+	const PermissionStore = WebpackModules.getStore("PermissionStore");
+	const ChannelListStore = WebpackModules.getStore("ChannelListStore");
 
-	const PermissionStoreActionHandler =
-		fluxDispatcherHandlers?.nodes[
-			WebpackModules.getStore("PermissionStore")._dispatchToken
-		].actionHandler;
+	const PermissionStoreActionHandler = getStoreActionHandler(
+		PermissionStore,
+		fluxDispatcher,
+	);
 
-	const ChannelListStoreActionHandler =
-		fluxDispatcherHandlers?.nodes[
-			WebpackModules.getStore("ChannelListStore")._dispatchToken
-		].actionHandler;
+	const ChannelListStoreActionHandler = getStoreActionHandler(
+		ChannelListStore,
+		fluxDispatcher,
+	);
 
 	const container = WebpackModules.getByKeys(
 		"container",
@@ -158,7 +160,6 @@ export function getModules() {
 		"createChannelRecord",
 	)?.createChannelRecord;
 
-	const ChannelListStore = WebpackModules.getStore("ChannelListStore");
 	const DEFAULT_AVATARS =
 		WebpackModules.getByKeys("DEFAULT_AVATARS")?.DEFAULT_AVATARS;
 
@@ -168,23 +169,6 @@ export function getModules() {
 	const Voice = WebpackModules.getByKeys("getVoiceStateStats");
 
 	const UserMentions = WebpackModules.getByKeys("handleUserContextMenu");
-
-	const ChannelUtils =
-		WebpackModules.getMangled(".SMALLER,className", {
-			// The topic renderer takes (channel, guild); title/breadcrumb exports take props.
-			// Match channel types independently so added switch cases remain compatible.
-			renderTopic: (m) =>
-				typeof m === "function" &&
-				m.length === 2 &&
-				WebpackModules.Filters.byStrings(
-					".GUILD_TEXT",
-					".GUILD_VOICE",
-					"guild:",
-				)(m),
-		}) ?? {};
-	if (!ChannelUtils?.renderTopic) {
-		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
-	}
 
 	const ProfileActions = WebpackModules.getMangled(
 		"setFlag: user cannot be undefined",
@@ -256,7 +240,6 @@ export function getModules() {
 		Voice,
 		RolePill,
 		UserMentions,
-		ChannelUtils,
 		ProfileActions,
 		PermissionUtils,
 		CategoryStore,

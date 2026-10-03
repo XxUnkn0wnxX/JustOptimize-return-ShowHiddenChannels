@@ -11,7 +11,6 @@ const {
 	Components: { TextElement },
 	GuildStore,
 	GuildRoleStore,
-	ChannelUtils,
 	React,
 } = getModules();
 
@@ -22,19 +21,24 @@ const CHANNEL_TYPES = {
 	5: "news",
 	6: "store",
 	13: "stage",
+	15: "forum",
+	16: "media",
 };
 
 export const Lockscreen = React.memo(
 	(
-		/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean }} */ {
+		/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean, showTopic?: boolean }} */ {
 			chat,
 			channel,
 			settings,
 			isLockedVoiceChannel = false,
+			showTopic = true,
 		},
 	) => {
 		const guild = GuildStore.getGuild(channel.guild_id);
 		const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id);
+		const topic =
+			showTopic && ![15, 16].includes(channel.type) ? channel.topic : null;
 
 		return (
 			<div
@@ -67,7 +71,7 @@ export const Lockscreen = React.memo(
 							fontWeight: "bold",
 						}}
 					>
-						{`This is a ${isLockedVoiceChannel ? "locked" : "hidden"} ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`}
+						{`This is a ${isLockedVoiceChannel ? "locked" : "hidden"}${CHANNEL_TYPES[channel.type] ? ` ${CHANNEL_TYPES[channel.type]}` : ""} channel`}
 					</TextElement>
 					<TextElement
 						color={TextElement.Colors.HEADER_SECONDARY}
@@ -78,17 +82,23 @@ export const Lockscreen = React.memo(
 					>
 						{isLockedVoiceChannel
 							? "You cannot connect to this channel."
-							: "You cannot see the contents of this channel."}{" "}
-						{!isLockedVoiceChannel &&
-							channel.topic &&
-							channel.type !== 15 &&
-							"However, you may see its topic."}
+							: "You cannot see the contents of this channel."}
 					</TextElement>
-					{/* Topic */}
-					{channel.topic &&
-						channel.type !== 15 &&
-						(ChannelUtils?.renderTopic?.(channel, guild) ||
-							"ChannelUtils module is missing, topic won't be shown.")}
+
+					{/* Plain text is available even when native view capture fails. */}
+					{topic && (
+						<TextElement
+							color={TextElement.Colors.STANDARD}
+							size={TextElement.Sizes.SIZE_14}
+							style={{
+								marginTop: 16,
+								whiteSpace: "pre-wrap",
+								overflowWrap: "anywhere",
+							}}
+						>
+							{topic}
+						</TextElement>
+					)}
 
 					{/* Icon Emoji */}
 					{channel?.iconEmoji && (
@@ -120,6 +130,16 @@ export const Lockscreen = React.memo(
 							size={TextElement.Sizes.SIZE_14}
 						>
 							Age-Restricted Channel (NSFW) 🔞
+						</TextElement>
+					)}
+
+					{/* Spoiler */}
+					{channel.isSpoilerChannel?.() && (
+						<TextElement
+							color={TextElement.Colors.STANDARD}
+							size={TextElement.Sizes.SIZE_14}
+						>
+							Spoiler Channel 👁️
 						</TextElement>
 					)}
 
@@ -159,10 +179,10 @@ export const Lockscreen = React.memo(
 						<div
 							style={{
 								margin: "16px auto 0 auto",
-								backgroundColor: "var(--background-secondary)",
+								backgroundColor: "var(--bg-surface-raised)",
 								padding: 10,
 								borderRadius: 5,
-								color: "var(--text-normal)",
+								color: "var(--text-default)",
 							}}
 						>
 							{/* Users */}

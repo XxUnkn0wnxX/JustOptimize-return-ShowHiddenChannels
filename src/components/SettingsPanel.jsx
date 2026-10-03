@@ -12,6 +12,7 @@ const {
 		SettingItem,
 	},
 } = BdApi;
+const { React } = BdApi;
 
 // If type starts with GUILD, it's a guild channel
 const ChannelTypes = Object.keys(DiscordConstants?.ChannelTypes ?? {}).filter(
@@ -64,7 +65,25 @@ const capitalizeFirst = (string) =>
 const randomNo = (min, max) =>
 	Math.floor(Math.random() * (max - min + 1) + min);
 
-export const SettingsPanel = ({ settings, onSettingsChange }) => {
+export const SettingsPanel = ({
+	settings: initialSettings,
+	onSettingsChange,
+}) => {
+	const [settings, setSettings] = React.useState(initialSettings);
+	const settingsRef = React.useRef(initialSettings);
+	const updateSetting = (name, valueOrUpdater) => {
+		const currentValue = settingsRef.current[name];
+		const value =
+			typeof valueOrUpdater === "function"
+				? valueOrUpdater(currentValue)
+				: valueOrUpdater;
+		const nextSettings = { ...settingsRef.current, [name]: value };
+
+		settingsRef.current = nextSettings;
+		setSettings(nextSettings);
+		onSettingsChange(name, value);
+	};
+
 	return (
 		<div>
 			{/* Gemeral Settings */}
@@ -89,7 +108,7 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 						]}
 						value={settings.hiddenChannelIcon}
 						onChange={(value) => {
-							onSettingsChange("hiddenChannelIcon", value);
+							updateSetting("hiddenChannelIcon", value);
 						}}
 					/>
 				</SettingItem>
@@ -116,14 +135,14 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 						]}
 						value={settings.sort}
 						onChange={(value) => {
-							onSettingsChange("sort", value);
+							updateSetting("sort", value);
 						}}
 					/>
 				</SettingItem>
 				<Switch
 					value={settings.showPerms}
 					onChange={(i) => {
-						onSettingsChange("showPerms", i);
+						updateSetting("showPerms", i);
 					}}
 					name="Show Permissions"
 					note="Show what roles/users can access the hidden channel."
@@ -145,14 +164,14 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 						]}
 						value={settings.showAdmin}
 						onChange={(value) => {
-							onSettingsChange("showAdmin", value);
+							updateSetting("showAdmin", value);
 						}}
 					/>
 				</SettingItem>
 				<Switch
 					value={settings.stopMarkingUnread}
 					onChange={(i) => {
-						onSettingsChange("stopMarkingUnread", i);
+						updateSetting("stopMarkingUnread", i);
 					}}
 					name="Stop marking hidden channels as read"
 					note="Stops the plugin from marking hidden channels as read."
@@ -160,7 +179,7 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 				<Switch
 					value={settings.shouldShowEmptyCategory}
 					onChange={(i) => {
-						onSettingsChange("shouldShowEmptyCategory", i);
+						updateSetting("shouldShowEmptyCategory", i);
 					}}
 					name="Show Empty Category"
 					note="Show Empty Category either because there were no channels in it or all channels are under the hidden channels category."
@@ -192,8 +211,10 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 							key={type}
 							value={settings.channels[type]}
 							onChange={(i) => {
-								settings.channels[type] = i;
-								onSettingsChange("channels", settings.channels);
+								updateSetting("channels", (channels) => ({
+									...channels,
+									[type]: i,
+								}));
 							}}
 							name={`Show ${formattedType} Channels`}
 						/>
@@ -215,8 +236,10 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 						note={guild.description}
 						value={settings.blacklistedGuilds?.[guild.id] ?? false}
 						onChange={(e) => {
-							settings.blacklistedGuilds[guild.id] = e;
-							onSettingsChange("blacklistedGuilds", settings.blacklistedGuilds);
+							updateSetting("blacklistedGuilds", (blacklistedGuilds) => ({
+								...blacklistedGuilds,
+								[guild.id]: e,
+							}));
 						}}
 						icon={
 							ImageResolver.getGuildIconURL(guild) ??
@@ -239,7 +262,7 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 				<Switch
 					value={settings.checkForUpdates}
 					onChange={(i) => {
-						onSettingsChange("checkForUpdates", i);
+						updateSetting("checkForUpdates", i);
 					}}
 					name="Check for Updates"
 					note="Check for updates on startup."
@@ -251,7 +274,7 @@ export const SettingsPanel = ({ settings, onSettingsChange }) => {
 						Logger.debug(`Debug mode ${i ? "enabled" : "disabled"}`);
 						Logger.isDebugging = i;
 
-						onSettingsChange("debugMode", i);
+						updateSetting("debugMode", i);
 					}}
 					name="Debug Mode"
 					note="Enable Debug Mode."
