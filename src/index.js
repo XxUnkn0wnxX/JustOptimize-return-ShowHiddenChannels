@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./discord').SHCChannel} SHCChannel */
 import styles from "./styles.css";
+import { getDispatcherNodes } from "./utils/dispatcher";
 
 const config = {
 	info: {
@@ -518,11 +519,7 @@ export default (() => {
 		}
 
 		getDispatcherNodes() {
-			const nodes =
-				this.getDiscordDispatcher()?._actionHandlers?._dependencyGraph?.nodes;
-
-			if (!nodes) return [];
-			return Array.isArray(nodes) ? nodes : Object.values(nodes);
+			return getDispatcherNodes(this.getDiscordDispatcher());
 		}
 
 		warnPrivateChannelHidingHotfixOnce(key, message) {
