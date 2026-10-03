@@ -98,9 +98,11 @@ and its merge commit, with identical resulting upstream trees.
   dependencies; the badge paths match a client HTML capture exactly. A settings
   regression check reproduces the stale selection before the fix and verifies
   updates with the original mounted props afterward. The standalone-pnpm build
-  and fresh live startup logs also passed. Initial client checks confirmed hidden text
-  and voice information screens and their headers render. The follow-up icon
-  and settings changes require a further client smoke test.
+  and fresh live startup logs also passed. Client checks confirmed hidden text
+  and voice information screens and their headers render. The user confirmed
+  the voice/stage icons and live radio-button updates work, and chose to retain
+  the native voice/stage header shading. Topic expansion has not been confirmed
+  in the client.
 
 ## Source and commit map
 
