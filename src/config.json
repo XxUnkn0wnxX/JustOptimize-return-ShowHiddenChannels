@@ -20,6 +20,8 @@
 				"Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.",
 				"Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.",
 				"Restored startup compatibility with Discord's current dispatcher storage.",
+				"Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.",
+				"Settings selections now update immediately while the panel remains open.",
 				"Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."
 			]
 		},

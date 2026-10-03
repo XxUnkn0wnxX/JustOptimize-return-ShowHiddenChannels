@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./discord').SHCChannel} SHCChannel */
 import styles from "./styles.css";
+import { installLockedChannelIcons } from "./utils/channelIcons";
 import { getDispatcherNodes } from "./utils/dispatcher";
 
 const config = {
@@ -549,7 +550,7 @@ export default (() => {
 				Utilities,
 				ReactTools,
 				// DOMTools,
-				// Logger,
+				Logger,
 
 				/* Discord Modules (From lib) */
 				ChannelStore,
@@ -602,6 +603,19 @@ export default (() => {
 						type: "warning",
 					},
 				);
+			}
+
+			const nativeChannelIconPatchInstalled = installLockedChannelIcons({
+				Webpack: BdApi?.Webpack,
+				Patcher,
+				ChannelTypes: DiscordConstants.ChannelTypes,
+				shouldShowInformation: (channel) =>
+					this.isHiddenChannel(channel) ||
+					!this.can(DiscordConstants.Permissions.CONNECT, channel),
+				warn: (message, error) => Logger.warn(message, error),
+			});
+			if (nativeChannelIconPatchInstalled) {
+				Logger.debug("Native voice/stage lock badge patch installed.");
 			}
 
 			Patcher.after(

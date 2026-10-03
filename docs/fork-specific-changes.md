@@ -33,7 +33,7 @@ target full SHAs.
 | Native channel view and topics | Keeps Discord's native header while replacing hidden-channel content and sidebars; removes the separate topic-renderer lookup. | Uses the native header for hidden and visible locked voice/stage channels. Preserves the header when replacing the call view, installs hooks only after checking the captured view, and restores instance toolbar patches on stop. If capture fails, the route information screen displays available non-forum/media topics as plain text. Topic discovery cannot block startup. | Prefer native rendering. Preserve locked-channel handling, hook cleanup, and the route fallback; do not restore a separate topic lookup without a demonstrated need. |
 | Dispatcher storage | Reads store handlers from the legacy dependency graph. | Resolves handlers by dispatch token from the store's own dispatcher, supporting the current `_nodes` Map and the legacy graph. The isolated experiment hotfix uses the same compatible node enumeration. Missing required handlers still fail module validation. | Preserve both dispatcher layouts and the existing failure gate until a reviewed upstream replacement covers them. |
 | Message loading | Stops message fetching for a channel classified as hidden. | Does not patch `MessageActions.fetchMessages`; Discord retains normal message and state refreshes for every channel. | Never restore fetch suppression as part of a routine upstream merge. |
-| Locked voice and stage channels | Uses the native header and information screen for hidden channels. | Visible guild voice and stage rows that the user cannot connect to retain Discord's native locked/limited presentation and open SHC's information screen. Native rendering and the route fallback both distinguish locked from hidden channels and leave the current connected channel alone. | Preserve the fork navigation, icon treatment, information predicate, and fail-closed tree lookup. |
+| Locked voice and stage channels | Uses the native header and information screen for hidden channels. | Hidden and visible non-connectable guild voice/stage rows replace Discord's generic padlock with the native channel-type icon and small lock badge. Other native icon states and locked tooltips remain intact; optional icon discovery failure retains Discord's original icon. Visible non-connectable rows open SHC's information screen. Native rendering and the route fallback distinguish locked from hidden channels and leave the current connected channel alone. | Preserve the fork navigation, distinct badged icons, information predicate, and fail-closed tree lookup. |
 | Private-channel-hiding experiment | Documents a manual `Not Eligible` override for Discord's `2026-02-private-channel-hiding` experiment. | Applies an isolated `Not Eligible` override at startup, verifies the resulting bucket, warns once on failure, and documents manual steps only as a fallback. | Keep the hotfix isolated; do not turn it into a general experiment framework. Remove it only after a reviewed replacement exists. |
 | Build metadata and self-updates | Uses upstream repository metadata and the latest stable upstream release. | Resolves the repository from explicit `--env updateRepo`, `SHC_GITHUB_REPOSITORY`, Actions' `GITHUB_REPOSITORY`, or the checkout's GitHub `origin`, then falls back to upstream. The resolved repository stamps `@source`, `@updateUrl`, and the runtime route. Fork builds consume only the stable rolling `Nightly-Fork` release; prereleases are unsupported. | Preserve repository-derived metadata and the stable-only updater policy. Never hardcode this fork into generated runtime logic. |
 | Publication | Uses upstream's release process. | Keeps `develop` source-only with no tracked root plugin, while `main` tracks the Actions-generated `ShowHiddenChannels.plugin.js`. Builds only for pushes or manual dispatches on `main`, commits only that generated file, and passes its exact bytes and commit SHA to publication. Publishing deletes and recreates `Nightly-Fork`, attaches exactly one explicit plugin asset, and relies on GitHub for source archives. | Keep the branch-specific artifact boundary and the split build/publish chain with its ancestry, metadata, freshness, and byte-identity gates. |
@@ -85,12 +85,22 @@ and its merge commit, with identical resulting upstream trees.
   experiment override, guarded native locked-row navigation, fork attribution,
   repository-derived update metadata, stable rolling publication, and existing
   fork changelog history. Upstream's changelog pruning was not imported.
+- Client-test follow-up: restore the user's preferred distinct voice/stage
+  symbols with native lock badges, without changing permissions, row navigation,
+  or locked tooltips. Preserve other native icon states. The native voice/stage
+  header retains Discord's call-mode styling. Settings controls now update their
+  mounted React state as well as the persisted values.
 - Verification: matched the native view hooks to the current cached Discord
   source, exercised its render methods and the adapted hooks with mocked
   dependencies, checked stop/restart and failed-capture behavior, and rechecked
-  current/legacy dispatcher discovery. The standalone-pnpm build and fresh
-  live startup logs also passed. Visual layout and user interaction still
-  require a client smoke test.
+  current/legacy dispatcher discovery. Follow-up checks exercised the current
+  native icon selector, row renderer, tooltip, and badge components with mocked
+  dependencies; the badge paths match a client HTML capture exactly. A settings
+  regression check reproduces the stale selection before the fix and verifies
+  updates with the original mounted props afterward. The standalone-pnpm build
+  and fresh live startup logs also passed. Initial client checks confirmed hidden text
+  and voice information screens and their headers render. The follow-up icon
+  and settings changes require a further client smoke test.
 
 ## Source and commit map
 
@@ -173,6 +183,12 @@ Primary files:
 - `src/index.js`
 - `src/components/Lockscreen.jsx`
 - `src/utils/modules.js`
+
+The optional icon patch in `src/utils/channelIcons.js` replaces only the generic
+locked glyph for hidden or non-connectable guild voice/stage channels. It uses
+Discord's existing badge components and restores the original selector on stop.
+This restores the earlier custom voice-icon preference and extends it to stage
+channels; it supersedes the generic-padlock choice in `a74fa48` below.
 
 Key commits:
 
