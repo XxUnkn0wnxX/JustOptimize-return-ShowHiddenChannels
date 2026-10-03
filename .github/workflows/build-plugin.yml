@@ -41,6 +41,9 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install pnpm
+        run: npm install --global "$(node --print "require('./package.json').packageManager")"
+
       - name: Prepare BetterDiscord build target
         run: |
           set -euo pipefail
@@ -49,10 +52,10 @@ jobs:
           echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: corepack pnpm install
+        run: pnpm install
 
       - name: Build plugin
-        run: corepack pnpm exec webpack --progress --color --env updateRepo="$GITHUB_REPOSITORY"
+        run: pnpm exec webpack --progress --color --env updateRepo="$GITHUB_REPOSITORY"
 
       - name: Upload compiled plugin
         if: >-

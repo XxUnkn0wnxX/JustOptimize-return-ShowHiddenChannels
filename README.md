@@ -40,11 +40,12 @@ In addition, you can also use the [PermissionsViewer](https://github.com/rauenzi
 
 ## Building
 
-Install dependencies and build the plugin with:
+Install pnpm directly with npm, then install dependencies and build the plugin:
 
 ```sh
-corepack pnpm install
-corepack pnpm exec webpack --progress --color
+npm install --global pnpm@12.8.1
+pnpm install
+pnpm exec webpack --progress --color
 ```
 
 A local build resolves the GitHub repository from the checkout's `origin`. To override it, pass `--env updateRepo=owner/repo`. GitHub Actions supplies its workflow repository automatically; the original [JustOptimize/ShowHiddenChannels](https://github.com/JustOptimize/ShowHiddenChannels) repository remains the fallback. The resolved repository is used for the generated `@source`, `@updateUrl`, and stable self-update endpoint. Fork builds publish to the rolling `Nightly-Fork` release; prereleases are not used.
