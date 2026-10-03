@@ -170,23 +170,6 @@ export function getModules() {
 
 	const UserMentions = WebpackModules.getByKeys("handleUserContextMenu");
 
-	const ChannelUtils =
-		WebpackModules.getMangled(".SMALLER,className", {
-			// The topic renderer takes (channel, guild); title/breadcrumb exports take props.
-			// Match channel types independently so added switch cases remain compatible.
-			renderTopic: (m) =>
-				typeof m === "function" &&
-				m.length === 2 &&
-				WebpackModules.Filters.byStrings(
-					".GUILD_TEXT",
-					".GUILD_VOICE",
-					"guild:",
-				)(m),
-		}) ?? {};
-	if (!ChannelUtils?.renderTopic) {
-		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
-	}
-
 	const ProfileActions = WebpackModules.getMangled(
 		"setFlag: user cannot be undefined",
 		{
@@ -257,7 +240,6 @@ export function getModules() {
 		Voice,
 		RolePill,
 		UserMentions,
-		ChannelUtils,
 		ProfileActions,
 		PermissionUtils,
 		CategoryStore,

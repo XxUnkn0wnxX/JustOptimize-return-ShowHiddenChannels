@@ -547,9 +547,9 @@ export default (() => {
 			const {
 				/* Library */
 				Utilities,
+				ReactTools,
 				// DOMTools,
 				// Logger,
-				// ReactTools,
 
 				/* Discord Modules (From lib) */
 				ChannelStore,
@@ -680,32 +680,186 @@ export default (() => {
 				);
 			}
 
-			Patcher.after(Route, "A", (_, _args, res) => {
-				if (!Voice || !Route) return res;
+			// Keep Discord's native header and replace only the informational
+			// channel's content. The unexported class is captured from its fiber.
+			let channelViewPatched = false;
+			let captureWarningShown = false;
+			const toolbarPatched = new WeakSet();
+			const { GUILD_VOICE, GUILD_STAGE_VOICE } = DiscordConstants.ChannelTypes;
+			const isVoiceLike = (type) =>
+				type === GUILD_VOICE || type === GUILD_STAGE_VOICE;
 
-				const channelId = res.props?.computedMatch?.params?.channelId;
-				const guildId = res.props?.computedMatch?.params?.guildId;
-				const channel = ChannelStore?.getChannel(channelId);
-				const isHiddenChannel = this.isHiddenChannel(channel);
-				const isLockedVoiceChannel =
-					channel?.isGuildVocal?.() &&
+			const getInformationState = (channel) => {
+				if (!channel || channel.id === Voice?.getChannelId()) return null;
+				const hidden = this.isHiddenChannel(channel);
+				const locked =
+					channel.isGuildVocal?.() &&
 					!this.can(DiscordConstants.Permissions.CONNECT, channel);
+				return hidden || locked
+					? { isLockedVoiceChannel: Boolean(locked && !hidden) }
+					: null;
+			};
 
+			const patchToolbar = (view) => {
+				if (toolbarPatched.has(view)) return;
+				if (typeof view.renderHeaderToolbar !== "function") return;
+				const undo = Patcher.after(
+					view,
+					"renderHeaderToolbar",
+					(self, _, items) => {
+						if (
+							!getInformationState(self.props?.channel) ||
+							!Array.isArray(items)
+						) {
+							return items;
+						}
+						return items.filter((item) => item?.key === "notifications");
+					},
+				);
+				toolbarPatched.add(view);
+				return undo;
+			};
+
+			const patchChannelView = (instance) => {
+				const prototype = instance?.constructor?.prototype;
 				if (
-					guildId &&
-					(isHiddenChannel || isLockedVoiceChannel) &&
-					channel?.id !== Voice.getChannelId()
+					![
+						"render",
+						"renderChat",
+						"renderCall",
+						"renderSidebar",
+						"shouldRenderCall",
+					].every((method) => typeof prototype?.[method] === "function") ||
+					typeof instance.renderHeaderBar !== "function" ||
+					typeof instance.renderHeaderToolbar !== "function"
 				) {
+					return false;
+				}
+
+				const undoPatches = [];
+				try {
+					// Only one content slot owns the lockscreen, including when Discord
+					// would normally substitute subscription, spoiler or age gating.
+					const swapWhen = (wantVoice) => (self, args, original) => {
+						const channel = self?.props?.channel;
+						const information = getInformationState(channel);
+						if (!information) return original.apply(self, args);
+						if (isVoiceLike(channel.type) !== wantVoice) return null;
+
+						const lockscreen = React.createElement(Lockscreen, {
+							chat,
+							channel,
+							settings: this.settings,
+							...information,
+							showTopic: false,
+						});
+						// render() omits its outer header for calls and activity panels.
+						if (
+							!self.shouldRenderCall() &&
+							!self.props.hasTextActivityInPanelMode
+						) {
+							return lockscreen;
+						}
+						return React.createElement(
+							wantVoice ? React.Fragment : "div",
+							wantVoice ? null : { className: "shc-hidden-chat-with-header" },
+							self.renderHeaderBar(),
+							lockscreen,
+						);
+					};
+
+					undoPatches.push(
+						Patcher.instead(prototype, "renderChat", swapWhen(false)),
+					);
+					undoPatches.push(
+						Patcher.instead(prototype, "renderCall", swapWhen(true)),
+					);
+					for (const method of [
+						"renderSidebar",
+						"renderThreadSidebar",
+						"renderEmbeddedActivityPanel",
+					]) {
+						if (typeof prototype[method] !== "function") continue;
+						undoPatches.push(
+							Patcher.instead(prototype, method, (self, args, original) =>
+								getInformationState(self.props?.channel)
+									? null
+									: original.apply(self, args),
+							),
+						);
+					}
+					undoPatches.push(
+						Patcher.before(prototype, "render", (self) => {
+							patchToolbar(self);
+						}),
+					);
+					undoPatches.push(patchToolbar(instance));
+					if (undoPatches.some((undo) => typeof undo !== "function")) {
+						throw new Error(
+							"A native channel-view hook could not be installed.",
+						);
+					}
+					channelViewPatched = true;
+					return true;
+				} catch (error) {
+					for (const undo of undoPatches.reverse()) {
+						if (typeof undo === "function") undo();
+					}
+					toolbarPatched.delete(instance);
+					if (!captureWarningShown) {
+						captureWarningShown = true;
+						require("./utils/modules").Logger.warn(
+							"Native channel view could not be patched; using the route lockscreen.",
+							error,
+						);
+					}
+					return false;
+				}
+			};
+
+			const captureChannelView = () => {
+				if (channelViewPatched) return true;
+
+				for (const sel of [
+					'[class*="chatContent"]',
+					'[class*="chat_"]',
+					'[class*="content_"]',
+				]) {
+					const node = document.querySelector(sel);
+					if (!node) continue;
+
+					let fiber = ReactTools.getInternalInstance(node);
+					for (let depth = 0; fiber && depth < 100; depth++) {
+						if (fiber.stateNode && patchChannelView(fiber.stateNode))
+							return true;
+						fiber = fiber.return;
+					}
+				}
+
+				return false;
+			};
+
+			captureChannelView();
+			this.captureViewTimeout = setTimeout(captureChannelView, 3000);
+
+			// Fail-safe until all native view hooks have been installed successfully.
+			Patcher.after(Route, "A", (_, _args, res) => {
+				if (!Voice || !Route || !res?.props) return res;
+				if (captureChannelView()) return res;
+
+				const channelId = res.props.computedMatch?.params?.channelId;
+				const guildId = res.props.computedMatch?.params?.guildId;
+				const channel = ChannelStore?.getChannel(channelId);
+				const information = getInformationState(channel);
+				if (guildId && information) {
 					res.props.render = () =>
 						React.createElement(Lockscreen, {
 							chat,
 							channel,
 							settings: this.settings,
-							isLockedVoiceChannel:
-								isLockedVoiceChannel && !isHiddenChannel,
+							...information,
 						});
 				}
-
 				return res;
 			});
 
@@ -1227,6 +1381,7 @@ export default (() => {
 			const { DOMTools, ContextMenu } = require("./utils/modules").getModules();
 			const { UnloadModules } = require("./utils/modules");
 
+			clearTimeout(this.captureViewTimeout);
 			this.api.Patcher.unpatchAll();
 			DOMTools.removeStyle(config.info.name);
 			ContextMenu?.unpatch("guild-context", this.processContextMenu);
