@@ -1,7 +1,7 @@
 /**
  * @name ShowHiddenChannels
  * @displayName Show Hidden Channels (SHC)
- * @version 6.11.1
+ * @version 6.12
  * @author JustOptimize (Oggetto), XxUnkn0wnxX (AI)
  * @authorId 619203349954166804
  * @source https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/tree/main
@@ -55,7 +55,7 @@ const AdminRolesElement = ({
   return BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     style: {
-      borderTop: "1px solid var(--background-tertiary)",
+      borderTop: "1px solid var(--border-subtle)",
       padding: 5
     }
   }, "Admin roles:", BdApi.React.createElement("div", {
@@ -115,7 +115,7 @@ function ChannelRolesComponent({
   return BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     style: {
-      borderTop: "1px solid var(--background-tertiary)",
+      borderTop: "1px solid var(--border-subtle)",
       padding: 8
     }
   }, "Channel-specific roles:", BdApi.React.createElement("div", {
@@ -165,10 +165,9 @@ function ForumComponent({
     size: TextElement.Sizes.SIZE_24,
     style: {
       margin: "16px auto",
-      backgroundColor: "var(--background-secondary)",
+      backgroundColor: "var(--bg-surface-raised)",
       padding: 24,
       borderRadius: 8,
-      color: "var(--text-normal)",
       fontWeight: "bold",
       maxWidth: "40vw"
     }
@@ -355,7 +354,6 @@ const {
   },
   GuildStore,
   GuildRoleStore,
-  ChannelUtils,
   React
 } = (0,_utils_modules__WEBPACK_IMPORTED_MODULE_1__.getModules)();
 const CHANNEL_TYPES = {
@@ -364,16 +362,20 @@ const CHANNEL_TYPES = {
   4: "category",
   5: "news",
   6: "store",
-  13: "stage"
+  13: "stage",
+  15: "forum",
+  16: "media"
 };
-const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean }} */{
+const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../discord').SHCChannel, settings: Record<string, any>, isLockedVoiceChannel?: boolean, showTopic?: boolean }} */{
   chat,
   channel,
   settings,
-  isLockedVoiceChannel = false
+  isLockedVoiceChannel = false,
+  showTopic = true
 }) => {
   const guild = GuildStore.getGuild(channel.guild_id);
   const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id);
+  const topic = showTopic && ![15, 16].includes(channel.type) ? channel.topic : null;
   return BdApi.React.createElement("div", {
     className: ["shc-hidden-chat-content", chat].filter(Boolean).join(" "),
     style: {
@@ -398,13 +400,21 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
       marginTop: 20,
       fontWeight: "bold"
     }
-  }, `This is a ${isLockedVoiceChannel ? "locked" : "hidden"} ${CHANNEL_TYPES[channel.type] ?? "unknown"} channel`), BdApi.React.createElement(TextElement, {
+  }, `This is a ${isLockedVoiceChannel ? "locked" : "hidden"}${CHANNEL_TYPES[channel.type] ? ` ${CHANNEL_TYPES[channel.type]}` : ""} channel`), BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.HEADER_SECONDARY,
     size: TextElement.Sizes.SIZE_16,
     style: {
       marginTop: 8
     }
-  }, isLockedVoiceChannel ? "You cannot connect to this channel." : "You cannot see the contents of this channel.", " ", !isLockedVoiceChannel && channel.topic && channel.type !== 15 && "However, you may see its topic."), channel.topic && channel.type !== 15 && (ChannelUtils?.renderTopic?.(channel, guild) || "ChannelUtils module is missing, topic won't be shown."), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
+  }, isLockedVoiceChannel ? "You cannot connect to this channel." : "You cannot see the contents of this channel."), topic && BdApi.React.createElement(TextElement, {
+    color: TextElement.Colors.STANDARD,
+    size: TextElement.Sizes.SIZE_14,
+    style: {
+      marginTop: 16,
+      whiteSpace: "pre-wrap",
+      overflowWrap: "anywhere"
+    }
+  }, topic), channel?.iconEmoji && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14,
     style: {
@@ -416,7 +426,10 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
   }, "Slowmode: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.convertToHMS)(Number(channel.rateLimitPerUser))), channel.nsfw && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
-  }, "Age-Restricted Channel (NSFW) \uD83D\uDD1E"), channel.bitrate && channel.type === 2 && BdApi.React.createElement(TextElement, {
+  }, "Age-Restricted Channel (NSFW) \uD83D\uDD1E"), channel.isSpoilerChannel?.() && BdApi.React.createElement(TextElement, {
+    color: TextElement.Colors.STANDARD,
+    size: TextElement.Sizes.SIZE_14
+  }, "Spoiler Channel \uD83D\uDC41\uFE0F"), channel.bitrate && channel.type === 2 && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
   }, "Bitrate: ", channel.bitrate / 1000, "kbps"), BdApi.React.createElement(TextElement, {
@@ -431,10 +444,10 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
   }, "Last message sent: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.getDateFromSnowflake)(channel.lastMessageId)), settings.showPerms && channel.permissionOverwrites && BdApi.React.createElement("div", {
     style: {
       margin: "16px auto 0 auto",
-      backgroundColor: "var(--background-secondary)",
+      backgroundColor: "var(--bg-surface-raised)",
       padding: 10,
       borderRadius: 5,
-      color: "var(--text-normal)"
+      color: "var(--text-default)"
     }
   }, BdApi.React.createElement(_UserMentionsComponent__WEBPACK_IMPORTED_MODULE_5__["default"], {
     channel: channel,
@@ -484,6 +497,9 @@ const {
     SettingItem
   }
 } = BdApi;
+const {
+  React
+} = BdApi;
 
 // If type starts with GUILD, it's a guild channel
 const ChannelTypes = Object.keys(DiscordConstants?.ChannelTypes ?? {}).filter(type => type.startsWith("GUILD") && type !== "GUILD_CATEGORY");
@@ -532,9 +548,22 @@ const Switch = ({
 const capitalizeFirst = string => `${string.charAt(0).toUpperCase()}${string.substring(1).toLowerCase()}`;
 const randomNo = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
 const SettingsPanel = ({
-  settings,
+  settings: initialSettings,
   onSettingsChange
 }) => {
+  const [settings, setSettings] = React.useState(initialSettings);
+  const settingsRef = React.useRef(initialSettings);
+  const updateSetting = (name, valueOrUpdater) => {
+    const currentValue = settingsRef.current[name];
+    const value = typeof valueOrUpdater === "function" ? valueOrUpdater(currentValue) : valueOrUpdater;
+    const nextSettings = {
+      ...settingsRef.current,
+      [name]: value
+    };
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    onSettingsChange(name, value);
+  };
   return BdApi.React.createElement("div", null, BdApi.React.createElement(SettingGroup, {
     settings: settings,
     name: "General Settings",
@@ -559,7 +588,7 @@ const SettingsPanel = ({
     }],
     value: settings.hiddenChannelIcon,
     onChange: value => {
-      onSettingsChange("hiddenChannelIcon", value);
+      updateSetting("hiddenChannelIcon", value);
     }
   })), BdApi.React.createElement(SettingItem, {
     id: "sortingOrder",
@@ -579,12 +608,12 @@ const SettingsPanel = ({
     }],
     value: settings.sort,
     onChange: value => {
-      onSettingsChange("sort", value);
+      updateSetting("sort", value);
     }
   })), BdApi.React.createElement(Switch, {
     value: settings.showPerms,
     onChange: i => {
-      onSettingsChange("showPerms", i);
+      updateSetting("showPerms", i);
     },
     name: "Show Permissions",
     note: "Show what roles/users can access the hidden channel."
@@ -609,19 +638,19 @@ const SettingsPanel = ({
     }],
     value: settings.showAdmin,
     onChange: value => {
-      onSettingsChange("showAdmin", value);
+      updateSetting("showAdmin", value);
     }
   })), BdApi.React.createElement(Switch, {
     value: settings.stopMarkingUnread,
     onChange: i => {
-      onSettingsChange("stopMarkingUnread", i);
+      updateSetting("stopMarkingUnread", i);
     },
     name: "Stop marking hidden channels as read",
     note: "Stops the plugin from marking hidden channels as read."
   }), BdApi.React.createElement(Switch, {
     value: settings.shouldShowEmptyCategory,
     onChange: i => {
-      onSettingsChange("shouldShowEmptyCategory", i);
+      updateSetting("shouldShowEmptyCategory", i);
     },
     name: "Show Empty Category",
     note: "Show Empty Category either because there were no channels in it or all channels are under the hidden channels category."
@@ -644,8 +673,10 @@ const SettingsPanel = ({
       key: type,
       value: settings.channels[type],
       onChange: i => {
-        settings.channels[type] = i;
-        onSettingsChange("channels", settings.channels);
+        updateSetting("channels", channels => ({
+          ...channels,
+          [type]: i
+        }));
       },
       name: `Show ${formattedType} Channels`
     });
@@ -660,8 +691,10 @@ const SettingsPanel = ({
     note: guild.description,
     value: settings.blacklistedGuilds?.[guild.id] ?? false,
     onChange: e => {
-      settings.blacklistedGuilds[guild.id] = e;
-      onSettingsChange("blacklistedGuilds", settings.blacklistedGuilds);
+      updateSetting("blacklistedGuilds", blacklistedGuilds => ({
+        ...blacklistedGuilds,
+        [guild.id]: e
+      }));
     },
     icon: ImageResolver.getGuildIconURL(guild) ?? DEFAULT_AVATARS[randomNo(0, DEFAULT_AVATARS.length - 1)]
   }, guild.name))), BdApi.React.createElement(SettingGroup, {
@@ -673,7 +706,7 @@ const SettingsPanel = ({
   }, BdApi.React.createElement(Switch, {
     value: settings.checkForUpdates,
     onChange: i => {
-      onSettingsChange("checkForUpdates", i);
+      updateSetting("checkForUpdates", i);
     },
     name: "Check for Updates",
     note: "Check for updates on startup."
@@ -683,7 +716,7 @@ const SettingsPanel = ({
       Logger.isDebugging = true;
       Logger.debug(`Debug mode ${i ? "enabled" : "disabled"}`);
       Logger.isDebugging = i;
-      onSettingsChange("debugMode", i);
+      updateSetting("debugMode", i);
     },
     name: "Debug Mode",
     note: "Enable Debug Mode."
@@ -789,7 +822,141 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   "default": () => (__WEBPACK_DEFAULT_EXPORT__)
 /* harmony export */ });
-/* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (".shc-hidden-notice {\n\tdisplay: flex;\n\tflex-direction: column;\n\ttext-align: center;\n\toverflow-y: auto;\n\tpadding: 10dvh 0px;\n\tmargin: 0px auto;\n\twidth: 100%;\n}\n\n.shc-hidden-notice > div[class^=\"divider\"] {\n\tdisplay: none;\n}\n\n.shc-hidden-notice > div[class^=\"topic\"] {\n\tbackground-color: var(--background-secondary);\n\tpadding: 5px;\n\tmax-width: 50dvh;\n\ttext-overflow: ellipsis;\n\tborder-radius: 8px;\n\tmargin: 12px auto 0 auto;\n\toverflow: visible;\n}\n\n.shc-rolePill {\n\tbackground-color: var(--background-primary);\n\tpadding: 12px;\n\tmargin: 4px 0;\n}\n");
+/* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ("/* Self-center regardless of slot: renderChat's parent is a flex row,\n   renderCall's is a flex column, so don't rely on Discord's chat class. */\n.shc-hidden-chat-content {\n\tdisplay: flex;\n\tflex: 1 1 auto;\n\tflex-direction: column;\n\tjustify-content: center;\n\talign-items: center;\n\tmin-height: 0;\n\theight: 100%;\n}\n\n.shc-hidden-chat-with-header {\n\tdisplay: flex;\n\tflex: 1 1 auto;\n\tflex-direction: column;\n\tmin-height: 0;\n\tmin-width: 0;\n\twidth: 100%;\n}\n\n.shc-hidden-notice {\n\tdisplay: flex;\n\tflex-direction: column;\n\ttext-align: center;\n\toverflow-y: auto;\n\tpadding: 10dvh 0px;\n\tmargin: 0px auto;\n\twidth: 100%;\n}\n\n.shc-rolePill {\n\tbackground-color: var(--background-mod-subtle);\n\tpadding: 12px;\n\tmargin: 4px 0;\n}\n");
+
+/***/ },
+
+/***/ "./src/utils/channelIcons.js"
+/*!***********************************!*\
+  !*** ./src/utils/channelIcons.js ***!
+  \***********************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   installLockedChannelIcons: () => (/* binding */ installLockedChannelIcons)
+/* harmony export */ });
+// @ts-check
+
+/**
+ * Replace Discord's generic locked icon for voice and stage rows with the
+ * matching native voice/stage icon that includes a lock badge.
+ *
+ * @param {{
+ *  Webpack: any,
+ *  Patcher: any,
+ *  ChannelTypes: any,
+ *  shouldShowInformation: (channel: any) => boolean,
+ *  warn?: (message: string, error?: unknown) => void,
+ * }} options
+ * @returns {boolean}
+ */
+function installLockedChannelIcons({
+	Webpack,
+	Patcher,
+	ChannelTypes,
+	shouldShowInformation,
+	warn,
+}) {
+	let hasWarned = false;
+	const warnOnce = (message, error) => {
+		if (hasWarned) return;
+		hasWarned = true;
+		try {
+			warn?.(message, error);
+		} catch {}
+	};
+	const unavailable = (error) => {
+		warnOnce("Native voice/stage lock badges could not be installed.", error);
+		return false;
+	};
+
+	try {
+		const byStrings = Webpack?.Filters?.byStrings;
+		if (
+			typeof Webpack?.getWithKey !== "function" ||
+			typeof Webpack?.getByKeys !== "function" ||
+			typeof Webpack?.getModule !== "function" ||
+			typeof byStrings !== "function" ||
+			typeof Patcher?.after !== "function" ||
+			typeof shouldShowInformation !== "function" ||
+			typeof ChannelTypes?.GUILD_VOICE !== "number" ||
+			typeof ChannelTypes?.GUILD_STAGE_VOICE !== "number"
+		) {
+			return unavailable();
+		}
+
+		const selectorMatch = Webpack.getWithKey(
+			byStrings(
+				"hasActiveThreads",
+				"textFocused",
+				".GUILD_STAGE_VOICE",
+				".LockIcon",
+			),
+		);
+		const [selectorModule, selectorKey] = selectorMatch ?? [];
+		const LockIcon = Webpack.getByKeys("LockIcon")?.LockIcon;
+		const voiceBadge = Webpack.getModule(
+			byStrings("M16 4h.5v-.5", "M20.5 12c-.28 0-.5.22"),
+			{ searchExports: true },
+		);
+		const stageBadge = Webpack.getModule(
+			byStrings("M21.92 14.08c.32.27.86.15", "M16.5 18H16"),
+			{ searchExports: true },
+		);
+
+		if (
+			!selectorModule ||
+			typeof selectorKey !== "string" ||
+			typeof selectorModule[selectorKey] !== "function" ||
+			typeof LockIcon !== "function" ||
+			typeof voiceBadge !== "function" ||
+			typeof stageBadge !== "function"
+		) {
+			return unavailable();
+		}
+
+		const unpatch = Patcher.after(
+			selectorModule,
+			selectorKey,
+			(_thisObject, args, result) => {
+				if (result !== LockIcon) return result;
+
+				const channel = args?.[0];
+				const settings = args?.[2];
+				if (settings?.locked !== true || channel?.guild_id == null) {
+					return result;
+				}
+
+				let badge;
+				if (channel.type === ChannelTypes.GUILD_VOICE) badge = voiceBadge;
+				else if (channel.type === ChannelTypes.GUILD_STAGE_VOICE)
+					badge = stageBadge;
+				else return result;
+
+				try {
+					return shouldShowInformation(channel) ? badge : result;
+				} catch (error) {
+					warnOnce(
+						"Could not check whether a locked channel should show its badge.",
+						error,
+					);
+					return result;
+				}
+			},
+		);
+		if (typeof unpatch !== "function") {
+			return unavailable(
+				new Error("Patcher.after did not return an unpatch function."),
+			);
+		}
+
+		return true;
+	} catch (error) {
+		return unavailable(error);
+	}
+}
+
 
 /***/ },
 
@@ -842,6 +1009,73 @@ function getDateFromSnowflake(snowflake) {
 
 /***/ },
 
+/***/ "./src/utils/dispatcher.js"
+/*!*********************************!*\
+  !*** ./src/utils/dispatcher.js ***!
+  \*********************************/
+(__unused_webpack_module, __webpack_exports__, __webpack_require__) {
+
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   getDispatcherNodes: () => (/* binding */ getDispatcherNodes),
+/* harmony export */   getStoreActionHandler: () => (/* binding */ getStoreActionHandler)
+/* harmony export */ });
+// @ts-check
+
+/**
+ * @param {any} dispatcher
+ * @returns {any[]}
+ */
+function getDispatcherNodes(dispatcher) {
+	const actionHandlers = dispatcher?._actionHandlers;
+	const nodes = actionHandlers?._nodes;
+
+	if (typeof nodes?.values === "function") {
+		try {
+			return Array.from(nodes.values());
+		} catch {
+			// Fall through to the legacy dependency graph.
+		}
+	}
+
+	const legacyNodes = actionHandlers?._dependencyGraph?.nodes;
+	if (Array.isArray(legacyNodes)) return legacyNodes;
+	if (legacyNodes && typeof legacyNodes === "object") {
+		return Object.values(legacyNodes);
+	}
+
+	return [];
+}
+
+/**
+ * @param {any} store
+ * @param {any} fallbackDispatcher
+ * @returns {any}
+ */
+function getStoreActionHandler(store, fallbackDispatcher) {
+	const dispatchToken = store?._dispatchToken;
+	if (dispatchToken == null) return undefined;
+
+	const dispatcher = store?._dispatcher ?? fallbackDispatcher;
+	const actionHandlers = dispatcher?._actionHandlers;
+	const nodes = actionHandlers?._nodes;
+
+	if (typeof nodes?.get === "function") {
+		try {
+			const handler = nodes.get(dispatchToken)?.actionHandler;
+			if (handler !== undefined) return handler;
+		} catch {
+			// Fall through to the legacy dependency graph.
+		}
+	}
+
+	const legacyNodes = actionHandlers?._dependencyGraph?.nodes;
+	return legacyNodes?.[dispatchToken]?.actionHandler;
+}
+
+
+/***/ },
+
 /***/ "./src/utils/modules.js"
 /*!******************************!*\
   !*** ./src/utils/modules.js ***!
@@ -855,7 +1089,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   getModules: () => (/* binding */ getModules),
 /* harmony export */   loaded_successfully: () => (/* binding */ loaded_successfully)
 /* harmony export */ });
+/* harmony import */ var _dispatcher__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./dispatcher */ "./src/utils/dispatcher.js");
 // @ts-check
+
+
 
 const Logger = {
 	isDebugging: false,
@@ -990,21 +1227,21 @@ function getModules() {
 		Logger.err("Failed to load ChannelPermissionStore", ChannelPermissionStore);
 	}
 
-	const fluxDispatcherHandlers = WebpackModules.getByKeys(
-		"dispatch",
-		"subscribe",
-		{ searchExports: true },
-	)?._actionHandlers._dependencyGraph;
+	const fluxDispatcher = WebpackModules.getByKeys("dispatch", "subscribe", {
+		searchExports: true,
+	});
+	const PermissionStore = WebpackModules.getStore("PermissionStore");
+	const ChannelListStore = WebpackModules.getStore("ChannelListStore");
 
-	const PermissionStoreActionHandler =
-		fluxDispatcherHandlers?.nodes[
-			WebpackModules.getStore("PermissionStore")._dispatchToken
-		].actionHandler;
+	const PermissionStoreActionHandler = (0,_dispatcher__WEBPACK_IMPORTED_MODULE_0__.getStoreActionHandler)(
+		PermissionStore,
+		fluxDispatcher,
+	);
 
-	const ChannelListStoreActionHandler =
-		fluxDispatcherHandlers?.nodes[
-			WebpackModules.getStore("ChannelListStore")._dispatchToken
-		].actionHandler;
+	const ChannelListStoreActionHandler = (0,_dispatcher__WEBPACK_IMPORTED_MODULE_0__.getStoreActionHandler)(
+		ChannelListStore,
+		fluxDispatcher,
+	);
 
 	const container = WebpackModules.getByKeys(
 		"container",
@@ -1015,7 +1252,6 @@ function getModules() {
 		"createChannelRecord",
 	)?.createChannelRecord;
 
-	const ChannelListStore = WebpackModules.getStore("ChannelListStore");
 	const DEFAULT_AVATARS =
 		WebpackModules.getByKeys("DEFAULT_AVATARS")?.DEFAULT_AVATARS;
 
@@ -1025,23 +1261,6 @@ function getModules() {
 	const Voice = WebpackModules.getByKeys("getVoiceStateStats");
 
 	const UserMentions = WebpackModules.getByKeys("handleUserContextMenu");
-
-	const ChannelUtils =
-		WebpackModules.getMangled(".SMALLER,className", {
-			// The topic renderer takes (channel, guild); title/breadcrumb exports take props.
-			// Match channel types independently so added switch cases remain compatible.
-			renderTopic: (m) =>
-				typeof m === "function" &&
-				m.length === 2 &&
-				WebpackModules.Filters.byStrings(
-					".GUILD_TEXT",
-					".GUILD_VOICE",
-					"guild:",
-				)(m),
-		}) ?? {};
-	if (!ChannelUtils?.renderTopic) {
-		Logger.warn("Failed to load ChannelUtils, topics won't be shown.");
-	}
 
 	const ProfileActions = WebpackModules.getMangled(
 		"setFlag: user cannot be undefined",
@@ -1113,7 +1332,6 @@ function getModules() {
 		Voice,
 		RolePill,
 		UserMentions,
-		ChannelUtils,
 		ProfileActions,
 		PermissionUtils,
 		CategoryStore,
@@ -1226,8 +1444,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   "default": () => (__WEBPACK_DEFAULT_EXPORT__)
 /* harmony export */ });
 /* harmony import */ var _styles_css__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./styles.css */ "./src/styles.css");
+/* harmony import */ var _utils_channelIcons__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./utils/channelIcons */ "./src/utils/channelIcons.js");
+/* harmony import */ var _utils_dispatcher__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./utils/dispatcher */ "./src/utils/dispatcher.js");
 // @ts-check
 /** @typedef {import('./discord').SHCChannel} SHCChannel */
+
+
 
 
 const config = {
@@ -1243,11 +1465,11 @@ const config = {
 		],
 		description:
 			"A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
-		version: "6.11.1",
+		version: "6.12",
 		github: `https://github.com/${"XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels"}/tree/main`,
 	},
 
-	changelog: [{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
+	changelog: [{"title":"v6.12 - Native Channel Header","type":"changed","items":["Hidden channels now keep Discord's real header, including its formatted topic and See More expander.","Hidden and visible locked voice/stage channels replace their content with channel information and hide side panels; the native header toolbar retains the mute button where available.","Fixed the lock screen not centering on hidden voice channels.","Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.","Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.","Restored startup compatibility with Discord's current dispatcher storage.","Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.","Settings selections now update immediately while the panel remains open.","Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."]},{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
 
 	main: "ShowHiddenChannels.plugin.js",
 	github_short: "XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels",
@@ -1746,11 +1968,7 @@ const config = {
 		}
 
 		getDispatcherNodes() {
-			const nodes =
-				this.getDiscordDispatcher()?._actionHandlers?._dependencyGraph?.nodes;
-
-			if (!nodes) return [];
-			return Array.isArray(nodes) ? nodes : Object.values(nodes);
+			return (0,_utils_dispatcher__WEBPACK_IMPORTED_MODULE_2__.getDispatcherNodes)(this.getDiscordDispatcher());
 		}
 
 		warnPrivateChannelHidingHotfixOnce(key, message) {
@@ -1778,9 +1996,9 @@ const config = {
 			const {
 				/* Library */
 				Utilities,
+				ReactTools,
 				// DOMTools,
-				// Logger,
-				// ReactTools,
+				Logger,
 
 				/* Discord Modules (From lib) */
 				ChannelStore,
@@ -1833,6 +2051,19 @@ const config = {
 						type: "warning",
 					},
 				);
+			}
+
+			const nativeChannelIconPatchInstalled = (0,_utils_channelIcons__WEBPACK_IMPORTED_MODULE_1__.installLockedChannelIcons)({
+				Webpack: BdApi?.Webpack,
+				Patcher,
+				ChannelTypes: DiscordConstants.ChannelTypes,
+				shouldShowInformation: (channel) =>
+					this.isHiddenChannel(channel) ||
+					!this.can(DiscordConstants.Permissions.CONNECT, channel),
+				warn: (message, error) => Logger.warn(message, error),
+			});
+			if (nativeChannelIconPatchInstalled) {
+				Logger.debug("Native voice/stage lock badge patch installed.");
 			}
 
 			Patcher.after(
@@ -1911,32 +2142,186 @@ const config = {
 				);
 			}
 
-			Patcher.after(Route, "A", (_, _args, res) => {
-				if (!Voice || !Route) return res;
+			// Keep Discord's native header and replace only the informational
+			// channel's content. The unexported class is captured from its fiber.
+			let channelViewPatched = false;
+			let captureWarningShown = false;
+			const toolbarPatched = new WeakSet();
+			const { GUILD_VOICE, GUILD_STAGE_VOICE } = DiscordConstants.ChannelTypes;
+			const isVoiceLike = (type) =>
+				type === GUILD_VOICE || type === GUILD_STAGE_VOICE;
 
-				const channelId = res.props?.computedMatch?.params?.channelId;
-				const guildId = res.props?.computedMatch?.params?.guildId;
-				const channel = ChannelStore?.getChannel(channelId);
-				const isHiddenChannel = this.isHiddenChannel(channel);
-				const isLockedVoiceChannel =
-					channel?.isGuildVocal?.() &&
+			const getInformationState = (channel) => {
+				if (!channel || channel.id === Voice?.getChannelId()) return null;
+				const hidden = this.isHiddenChannel(channel);
+				const locked =
+					channel.isGuildVocal?.() &&
 					!this.can(DiscordConstants.Permissions.CONNECT, channel);
+				return hidden || locked
+					? { isLockedVoiceChannel: Boolean(locked && !hidden) }
+					: null;
+			};
 
+			const patchToolbar = (view) => {
+				if (toolbarPatched.has(view)) return;
+				if (typeof view.renderHeaderToolbar !== "function") return;
+				const undo = Patcher.after(
+					view,
+					"renderHeaderToolbar",
+					(self, _, items) => {
+						if (
+							!getInformationState(self.props?.channel) ||
+							!Array.isArray(items)
+						) {
+							return items;
+						}
+						return items.filter((item) => item?.key === "notifications");
+					},
+				);
+				toolbarPatched.add(view);
+				return undo;
+			};
+
+			const patchChannelView = (instance) => {
+				const prototype = instance?.constructor?.prototype;
 				if (
-					guildId &&
-					(isHiddenChannel || isLockedVoiceChannel) &&
-					channel?.id !== Voice.getChannelId()
+					![
+						"render",
+						"renderChat",
+						"renderCall",
+						"renderSidebar",
+						"shouldRenderCall",
+					].every((method) => typeof prototype?.[method] === "function") ||
+					typeof instance.renderHeaderBar !== "function" ||
+					typeof instance.renderHeaderToolbar !== "function"
 				) {
+					return false;
+				}
+
+				const undoPatches = [];
+				try {
+					// Only one content slot owns the lockscreen, including when Discord
+					// would normally substitute subscription, spoiler or age gating.
+					const swapWhen = (wantVoice) => (self, args, original) => {
+						const channel = self?.props?.channel;
+						const information = getInformationState(channel);
+						if (!information) return original.apply(self, args);
+						if (isVoiceLike(channel.type) !== wantVoice) return null;
+
+						const lockscreen = React.createElement(Lockscreen, {
+							chat,
+							channel,
+							settings: this.settings,
+							...information,
+							showTopic: false,
+						});
+						// render() omits its outer header for calls and activity panels.
+						if (
+							!self.shouldRenderCall() &&
+							!self.props.hasTextActivityInPanelMode
+						) {
+							return lockscreen;
+						}
+						return React.createElement(
+							wantVoice ? React.Fragment : "div",
+							wantVoice ? null : { className: "shc-hidden-chat-with-header" },
+							self.renderHeaderBar(),
+							lockscreen,
+						);
+					};
+
+					undoPatches.push(
+						Patcher.instead(prototype, "renderChat", swapWhen(false)),
+					);
+					undoPatches.push(
+						Patcher.instead(prototype, "renderCall", swapWhen(true)),
+					);
+					for (const method of [
+						"renderSidebar",
+						"renderThreadSidebar",
+						"renderEmbeddedActivityPanel",
+					]) {
+						if (typeof prototype[method] !== "function") continue;
+						undoPatches.push(
+							Patcher.instead(prototype, method, (self, args, original) =>
+								getInformationState(self.props?.channel)
+									? null
+									: original.apply(self, args),
+							),
+						);
+					}
+					undoPatches.push(
+						Patcher.before(prototype, "render", (self) => {
+							patchToolbar(self);
+						}),
+					);
+					undoPatches.push(patchToolbar(instance));
+					if (undoPatches.some((undo) => typeof undo !== "function")) {
+						throw new Error(
+							"A native channel-view hook could not be installed.",
+						);
+					}
+					channelViewPatched = true;
+					return true;
+				} catch (error) {
+					for (const undo of undoPatches.reverse()) {
+						if (typeof undo === "function") undo();
+					}
+					toolbarPatched.delete(instance);
+					if (!captureWarningShown) {
+						captureWarningShown = true;
+						(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(
+							"Native channel view could not be patched; using the route lockscreen.",
+							error,
+						);
+					}
+					return false;
+				}
+			};
+
+			const captureChannelView = () => {
+				if (channelViewPatched) return true;
+
+				for (const sel of [
+					'[class*="chatContent"]',
+					'[class*="chat_"]',
+					'[class*="content_"]',
+				]) {
+					const node = document.querySelector(sel);
+					if (!node) continue;
+
+					let fiber = ReactTools.getInternalInstance(node);
+					for (let depth = 0; fiber && depth < 100; depth++) {
+						if (fiber.stateNode && patchChannelView(fiber.stateNode))
+							return true;
+						fiber = fiber.return;
+					}
+				}
+
+				return false;
+			};
+
+			captureChannelView();
+			this.captureViewTimeout = setTimeout(captureChannelView, 3000);
+
+			// Fail-safe until all native view hooks have been installed successfully.
+			Patcher.after(Route, "A", (_, _args, res) => {
+				if (!Voice || !Route || !res?.props) return res;
+				if (captureChannelView()) return res;
+
+				const channelId = res.props.computedMatch?.params?.channelId;
+				const guildId = res.props.computedMatch?.params?.guildId;
+				const channel = ChannelStore?.getChannel(channelId);
+				const information = getInformationState(channel);
+				if (guildId && information) {
 					res.props.render = () =>
 						React.createElement(Lockscreen, {
 							chat,
 							channel,
 							settings: this.settings,
-							isLockedVoiceChannel:
-								isLockedVoiceChannel && !isHiddenChannel,
+							...information,
 						});
 				}
-
 				return res;
 			});
 
@@ -2458,6 +2843,7 @@ const config = {
 			const { DOMTools, ContextMenu } = (__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").getModules)();
 			const { UnloadModules } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
+			clearTimeout(this.captureViewTimeout);
 			this.api.Patcher.unpatchAll();
 			DOMTools.removeStyle(config.info.name);
 			ContextMenu?.unpatch("guild-context", this.processContextMenu);
