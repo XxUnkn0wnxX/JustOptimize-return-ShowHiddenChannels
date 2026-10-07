@@ -6,9 +6,9 @@ Ordinary upstream changes should be accepted unless they overlap one of the
 contracts below.
 
 The latest reviewed upstream boundary is
+[`30b6a23e`](https://github.com/JustOptimize/ShowHiddenChannels/commit/30b6a23ec154c69b2dbd5b477cde4dcd8876aa6e)
+on 2026-10-08, using
 [`0426b6bc`](https://github.com/JustOptimize/ShowHiddenChannels/commit/0426b6bc815491d1d1b0bd3475563ee3b32cea58)
-on 2026-10-03, using
-[`affc379d`](https://github.com/JustOptimize/ShowHiddenChannels/commit/affc379d8d9490c32842d40a970c0a52937d7cbc)
 as the shared range base. Commit labels are abbreviated for readability; links
 target full SHAs.
 
@@ -28,14 +28,14 @@ target full SHAs.
 
 | Area | Upstream behavior | Fork contract | Merge rule |
 | --- | --- | --- | --- |
-| Channel discovery | Uses Discord's `createChannelRecord` factory and a local `VIEW_CHANNEL` permission predicate. | Uses the same current Discord model through BetterDiscord's `BdApi.Webpack`, with guarded lookup and synthetic category permission overwrites. | Treat the model fix as upstream-owned. Keep the direct BetterDiscord lookup and its stronger function guard unless upstream provides a better equivalent. |
+| Channel discovery | Uses Discord's `createChannelRecord` factory and a local `VIEW_CHANNEL` permission predicate. | Uses the same current Discord model through BetterDiscord's `BdApi.Webpack`, with guarded lookup and synthetic category permission overwrites. `WebpackModules` is an alias of that same API. | Treat the model fix as upstream-owned. Accept equivalent upstream lookup code while keeping the stronger function guard unless upstream provides a better equivalent. |
 | Hidden-channel predicate | Rejects non-channel values, direct messages, and Discord's `browse`, `customize`, and `guide` pseudo-channels. | Uses the same exclusions in the fork's `isHiddenChannel` helper, which is also used by locked-voice and experiment-related paths. | Port future predicate hardening without renaming the fork helper or bypassing its callers. |
 | Native channel view and topics | Keeps Discord's native header while replacing hidden-channel content and sidebars; removes the separate topic-renderer lookup. | Uses the native header for hidden and visible locked voice/stage channels. Preserves the header when replacing the call view, installs hooks only after checking the captured view, and restores instance toolbar patches on stop. If capture fails, the route information screen displays available non-forum/media topics as plain text. Topic discovery cannot block startup. | Prefer native rendering. Preserve locked-channel handling, hook cleanup, and the route fallback; do not restore a separate topic lookup without a demonstrated need. |
-| Dispatcher storage | Reads store handlers from the legacy dependency graph. | Resolves handlers by dispatch token from the store's own dispatcher, supporting the current `_nodes` Map and the legacy graph. The isolated experiment hotfix uses the same compatible node enumeration. Missing required handlers still fail module validation. | Preserve both dispatcher layouts and the existing failure gate until a reviewed upstream replacement covers them. |
+| Dispatcher storage | Resolves handlers by dispatch token from the store's own dispatcher `_nodes` Map. | Uses the same current lookup with guards and a legacy-graph fallback. The isolated experiment hotfix uses the same compatible node enumeration. Missing required handlers still fail module validation. | Preserve both dispatcher layouts and the existing failure gate until a reviewed upstream replacement covers them. |
 | Message loading | Stops message fetching for a channel classified as hidden. | Does not patch `MessageActions.fetchMessages`; Discord retains normal message and state refreshes for every channel. | Never restore fetch suppression as part of a routine upstream merge. |
-| Locked voice and stage channels | Uses the native header and information screen for hidden channels. | Hidden and visible non-connectable guild voice/stage rows replace Discord's generic padlock with the native channel-type icon and small lock badge. Other native icon states and locked tooltips remain intact; optional icon discovery failure retains Discord's original icon. Visible non-connectable rows open SHC's information screen. Native rendering and the route fallback distinguish locked from hidden channels and leave the current connected channel alone. | Preserve the fork navigation, distinct badged icons, information predicate, and fail-closed tree lookup. |
+| Locked voice and stage channels | Uses the native header and information screen for hidden channels, and clears the icon selector's locked flag for hidden channels. | Hidden and visible non-connectable guild voice/stage rows replace Discord's generic padlock with the native channel-type icon and small lock badge. Other native icon states and locked tooltips remain intact; optional icon discovery failure retains Discord's original icon. Visible non-connectable rows open SHC's information screen. Native rendering and the route fallback distinguish locked from hidden channels and leave the current connected channel alone. | Preserve the fork navigation, distinct badged icons, information predicate, and fail-closed tree lookup. |
 | Private-channel-hiding experiment | Documents a manual `Not Eligible` override for Discord's `2026-02-private-channel-hiding` experiment. | Applies an isolated `Not Eligible` override at startup, verifies the resulting bucket, warns once on failure, and documents manual steps only as a fallback. | Keep the hotfix isolated; do not turn it into a general experiment framework. Remove it only after a reviewed replacement exists. |
-| Build metadata and self-updates | Uses upstream repository metadata and the latest stable upstream release. | Resolves the repository from explicit `--env updateRepo`, `SHC_GITHUB_REPOSITORY`, Actions' `GITHUB_REPOSITORY`, or the checkout's GitHub `origin`, then falls back to upstream. The resolved repository stamps `@source`, `@updateUrl`, and the runtime route. Fork builds consume only the stable rolling `Nightly-Fork` release; prereleases are unsupported. | Preserve repository-derived metadata and the stable-only updater policy. Never hardcode this fork into generated runtime logic. |
+| Build metadata and self-updates | Uses upstream repository metadata and stable releases by default, with opt-in prerelease updates. | Resolves the repository from explicit `--env updateRepo`, `SHC_GITHUB_REPOSITORY`, Actions' `GITHUB_REPOSITORY`, or the checkout's GitHub `origin`, then falls back to upstream. The resolved repository stamps `@source`, `@updateUrl`, and the runtime route. Fork builds consume only the stable rolling `Nightly-Fork` release; prereleases are unsupported. | Preserve repository-derived metadata and the stable-only updater policy. Never hardcode this fork into generated runtime logic. |
 | Publication | Uses upstream's release process. | Keeps `develop` source-only with no tracked root plugin, while `main` tracks the Actions-generated `ShowHiddenChannels.plugin.js`. Builds only for pushes or manual dispatches on `main`, commits only that generated file, and passes its exact bytes and commit SHA to publication. Publishing deletes and recreates `Nightly-Fork`, attaches exactly one explicit plugin asset, and relies on GitHub for source archives. | Keep the branch-specific artifact boundary and the split build/publish chain with its ancestry, metadata, freshness, and byte-identity gates. |
 | Attribution | Credits the upstream author and repository. | Keeps the original author ID while adding `XxUnkn0wnxX (AI)` to fork-facing author metadata. Generated source and update links remain repository-derived. | Preserve both upstream credit and fork attribution. |
 
@@ -103,6 +103,77 @@ and its merge commit, with identical resulting upstream trees.
   the voice/stage icons and live radio-button updates work, and chose to retain
   the native voice/stage header shading. Topic expansion has not been confirmed
   in the client.
+
+## Reviewed integration: upstream v6.13 and v6.14
+
+The `0426b6bc..30b6a23e` range contains the dispatcher fix
+[`6103c31`](https://github.com/JustOptimize/ShowHiddenChannels/commit/6103c3103c74b7628f5f21faeb933f9016630f6d),
+the module integration tests and their merge, and the channel-renderer/role-pill
+fix at the reviewed boundary.
+
+- Accepted: upstream's exact `ChannelItemRenderer` and `RolePill` discovery
+  expressions, the Discord integration-test runner and package script, and the
+  v6.14 version boundary. These lookups use the standard BetterDiscord Webpack API.
+- Adapted: the probe omits required `MessageActions.fetchMessages` and
+  `ChannelItemUtils.icon` checks because this fork intentionally has neither
+  loader export. All other upstream probe checks remain. Contributor instructions
+  use standalone pnpm, explain the live-copy build and live-renderer test, retain
+  the source-only branch boundary, and preserve historical changelog entries.
+- Retained: the fork's store-local dispatcher lookup already implements the
+  upstream fix, with guards and a legacy-graph fallback. The v6.13 changelog entry
+  records that this fork included the compatibility fix in v6.12. Normal message
+  fetching, native headers and cleanup, topic fallback, locked voice/stage
+  navigation and badges, settings state updates, the automatic experiment
+  override, fork attribution, repository-derived updates, and publication
+  workflows are unchanged.
+- Not imported: the Map-only dispatcher replacement, changelog-history pruning,
+  or test requirements for intentionally removed exports. No fork-specific
+  behavior contract changed.
+- Verification: source parsing, Biome checks on all five changed/new JavaScript
+  and JSON files, exact upstream lookup/runner comparisons, release-schema
+  checks, and an isolated webpack compilation passed. The compilation used an
+  ignored scratch output and removed the live-copy hook only from its in-memory
+  configuration; existing `dist` and installed plugin bytes and timestamps were
+  unchanged. Dispatcher checks exercised the captured Discord registry, legacy
+  layout, experiment-node enumeration, and missing-handler failure gate. The
+  merged source passed 215 existing icon/settings checks using mocks and captured
+  Discord factories. The 633 native-header checks passed before the merge, and
+  their tested runtime source files remain byte-identical; that historical
+  harness still pins the v6.12 config version and was not rewritten.
+- Subsequent live verification: the authorized v6.14 webpack build, including
+  the optional fixes below, completed successfully and the installed plugin
+  matched the compiled output byte-for-byte. The user's client screenshot
+  confirmed hidden text-channel rows and lock badges, the information screen
+  and native header, and rendered role pills. Voice/stage behavior, topic
+  expansion, settings interaction, and restart/cleanup have not been rechecked
+  in the client for this range.
+
+## Optional upstream bug fixes
+
+These are narrow fixes for failure paths also present at upstream `30b6a23e`,
+not permanent fork behavior overrides. Reevaluate them during upstream reviews
+and prefer an equivalent upstream fix. Remove the corresponding local adaptation
+once the upstream replacement passes the relevant regression checks; the tests
+should continue covering the intended behavior.
+
+| Fix | Reproduced failure | Local adaptation | When it can be dropped |
+| --- | --- | --- | --- |
+| Missing mapped channel renderer | `getMangled()` can return an empty object or a mapping without a callable `render`. The loader's top-level checks accept that object and report success even though channel-row patching has no valid target. | Validate `ChannelItemRenderer.render` as a function and use the existing failed-module startup gate when it is unavailable. Keep upstream's lookup expression unchanged. | Upstream validates the callable export or provides equivalent handling that prevents false-success startup with an unusable renderer. |
+| Container-readiness timeout | The ten-second timeout calls `Logger.error`, but SHC's logger exports `err`. The callback throws after clearing its interval and before resolving the readiness promise, leaving startup pending. | Call the existing `Logger.err` method; preserve the timeout and its normal continuation into module validation. | Upstream handles this timeout without an invalid logger call or an indefinitely pending startup. |
+
+Source locations are `src/utils/modules.js:getModules()` and
+`src/index.js:start()`. These fixes do not change channel permissions, message
+fetching, icons, experiment overrides, settings, update routing, or publication.
+They are distinct from the protected fork behavior listed above.
+
+Verification uses `pnpm run test:unit` and
+`tests/startup-regressions.test.cjs`, which executes the actual module loader,
+plugin startup method, and exported logger with mocked BetterDiscord modules and
+timers. Replaying the same seven tests against pre-fix commit `d822b5e` produced
+five expected failures and two passing controls; all seven pass with these fixes.
+Coverage includes invalid renderer exports, recovery after unloading the module
+cache, timeout logging and completion into the broken-module gate, and normal
+startup. This proves the isolated failure paths; it is not a live Discord result.
 
 ## Source and commit map
 

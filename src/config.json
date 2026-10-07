@@ -1,7 +1,7 @@
 {
 	"name": "ShowHiddenChannels",
 	"displayName": "Show Hidden Channels (SHC)",
-	"version": "6.12",
+	"version": "6.14",
 	"author": "JustOptimize (Oggetto), XxUnkn0wnxX (AI)",
 	"authorId": "619203349954166804",
 	"source": "https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/tree/main",
@@ -10,6 +10,20 @@
 	"description": "A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
 	"runAt": "idle",
 	"changelog": [
+		{
+			"title": "v6.14 - Discord Update",
+			"type": "fixed",
+			"items": [
+				"Fixed the hidden channel lock icon and role pills missing after a Discord update."
+			]
+		},
+		{
+			"title": "v6.13 - Discord Dispatcher Update",
+			"type": "fixed",
+			"items": [
+				"Upstream fixed startup after Discord's dispatcher update (#291); this fork already included current and legacy dispatcher support in v6.12."
+			]
+		},
 		{
 			"title": "v6.12 - Native Channel Header",
 			"type": "changed",
