@@ -119,12 +119,21 @@ export function getModules() {
 
 	const Route = WebpackModules.getBySource(/.ImpressionTypes.PAGE,name:\w+,/);
 
-	const ChannelItemRenderer = WebpackModules.getModule((m) =>
-		m.render?.toString().includes(".ALL_MESSAGES"),
+	const ChannelItemRenderer = WebpackModules.getMangled(
+		'location:"channel_item"',
+		{
+			render: WebpackModules.Filters.byStrings(
+				"connectDragPreview:",
+				".ALL_MESSAGES",
+			),
+		},
 	);
 
 	const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
-		RolePill: (m) => m?.render != null,
+		RolePill: WebpackModules.Filters.byStrings(
+			"disableBorderColor",
+			"onContextMenu",
+		),
 	})?.RolePill;
 
 	const ChannelPermissionStore = WebpackModules.getByKeys(
