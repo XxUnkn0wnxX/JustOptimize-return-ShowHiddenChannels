@@ -139,9 +139,14 @@ fix at the reviewed boundary.
   merged source passed 215 existing icon/settings checks using mocks and captured
   Discord factories. The 633 native-header checks passed before the merge, and
   their tested runtime source files remain byte-identical; that historical
-  harness still pins the v6.12 config version and was not rewritten. Current-client
-  module discovery, rendering and lifecycle checks, live sync, and publication
-  have not been performed for this range.
+  harness still pins the v6.12 config version and was not rewritten.
+- Subsequent live verification: the authorized v6.14 webpack build, including
+  the optional fixes below, completed successfully and the installed plugin
+  matched the compiled output byte-for-byte. The user's client screenshot
+  confirmed hidden text-channel rows and lock badges, the information screen
+  and native header, and rendered role pills. Voice/stage behavior, topic
+  expansion, settings interaction, and restart/cleanup have not been rechecked
+  in the client for this range.
 
 ## Optional upstream bug fixes
 
