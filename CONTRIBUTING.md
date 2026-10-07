@@ -14,6 +14,19 @@ you intend to live-test that copy.
 pnpm exec webpack --progress --color
 ```
 
+## Testing startup regressions
+
+Run the offline regression checks with:
+
+```bash
+pnpm run test:unit
+```
+
+These checks execute the plugin's module loader and startup source with mocked
+BetterDiscord modules and timers. They verify the optional upstream bug fixes
+recorded in `docs/fork-specific-changes.md`; they do not access a live Discord
+client or establish current-client module discovery or rendering compatibility.
+
 ## Testing Discord module discovery
 
 Use Node.js 22 or newer. This test requires an existing Discord

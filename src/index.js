@@ -325,7 +325,7 @@ export default (() => {
 						resolve();
 					} else if (Date.now() - start >= 10000) {
 						clearInterval(interval);
-						Logger.error("Timed out waiting for container module after 10s");
+						Logger.err("Timed out waiting for container module after 10s");
 						resolve();
 					}
 				}, 500);

@@ -128,6 +128,10 @@ export function getModules() {
 			),
 		},
 	);
+	if (typeof ChannelItemRenderer?.render !== "function") {
+		loaded_successfully = false;
+		Logger.err("Failed to load ChannelItemRenderer", ChannelItemRenderer);
+	}
 
 	const RolePill = WebpackModules.getMangled("overflow-more-roles-", {
 		RolePill: WebpackModules.Filters.byStrings(

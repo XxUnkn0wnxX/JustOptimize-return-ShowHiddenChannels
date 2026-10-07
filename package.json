@@ -4,7 +4,8 @@
 	"main": "ShowHiddenChannels.plugin.js",
 	"scripts": {
 		"build": "webpack --progress --color",
-		"test:discord": "node --test tests/discord-modules.test.cjs"
+		"test:discord": "node --test tests/discord-modules.test.cjs",
+		"test:unit": "node --test tests/startup-regressions.test.cjs"
 	},
 	"author": "JustOptimize (Oggetto), XxUnkn0wnxX (AI)",
 	"license": "GPL-3.0-only",

@@ -143,6 +143,33 @@ fix at the reviewed boundary.
   module discovery, rendering and lifecycle checks, live sync, and publication
   have not been performed for this range.
 
+## Optional upstream bug fixes
+
+These are narrow fixes for failure paths also present at upstream `30b6a23e`,
+not permanent fork behavior overrides. Reevaluate them during upstream reviews
+and prefer an equivalent upstream fix. Remove the corresponding local adaptation
+once the upstream replacement passes the relevant regression checks; the tests
+should continue covering the intended behavior.
+
+| Fix | Reproduced failure | Local adaptation | When it can be dropped |
+| --- | --- | --- | --- |
+| Missing mapped channel renderer | `getMangled()` can return an empty object or a mapping without a callable `render`. The loader's top-level checks accept that object and report success even though channel-row patching has no valid target. | Validate `ChannelItemRenderer.render` as a function and use the existing failed-module startup gate when it is unavailable. Keep upstream's lookup expression unchanged. | Upstream validates the callable export or provides equivalent handling that prevents false-success startup with an unusable renderer. |
+| Container-readiness timeout | The ten-second timeout calls `Logger.error`, but SHC's logger exports `err`. The callback throws after clearing its interval and before resolving the readiness promise, leaving startup pending. | Call the existing `Logger.err` method; preserve the timeout and its normal continuation into module validation. | Upstream handles this timeout without an invalid logger call or an indefinitely pending startup. |
+
+Source locations are `src/utils/modules.js:getModules()` and
+`src/index.js:start()`. These fixes do not change channel permissions, message
+fetching, icons, experiment overrides, settings, update routing, or publication.
+They are distinct from the protected fork behavior listed above.
+
+Verification uses `pnpm run test:unit` and
+`tests/startup-regressions.test.cjs`, which executes the actual module loader,
+plugin startup method, and exported logger with mocked BetterDiscord modules and
+timers. Replaying the same seven tests against pre-fix commit `d822b5e` produced
+five expected failures and two passing controls; all seven pass with these fixes.
+Coverage includes invalid renderer exports, recovery after unloading the module
+cache, timeout logging and completion into the broken-module gate, and normal
+startup. This proves the isolated failure paths; it is not a live Discord result.
+
 ## Source and commit map
 
 ### Fork-aware builds and self-updates
