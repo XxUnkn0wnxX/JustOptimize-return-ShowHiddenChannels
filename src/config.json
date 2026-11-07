@@ -1,7 +1,7 @@
 {
 	"name": "ShowHiddenChannels",
 	"displayName": "Show Hidden Channels (SHC)",
-	"version": "6.14",
+	"version": "6.15",
 	"author": "JustOptimize (Oggetto)",
 	"authorId": "619203349954166804",
 	"source": "https://github.com/JustOptimize/ShowHiddenChannels",
@@ -9,6 +9,13 @@
 	"description": "A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
 	"runAt": "idle",
 	"changelog": [
+		{
+			"title": "v6.15 - Discord Update",
+			"type": "fixed",
+			"items": [
+				"Fixed the plugin not working after Discord's rspack update (#294)."
+			]
+		},
 		{
 			"title": "v6.14 - Discord Update",
 			"type": "fixed",
@@ -21,17 +28,6 @@
 			"type": "fixed",
 			"items": [
 				"Fixed the plugin failing to load after Discord's dispatcher update (#291)."
-			]
-		},
-		{
-			"title": "v6.12 - Native Channel Header",
-			"type": "changed",
-			"items": [
-				"Hidden channels now keep Discord's real header, so the channel topic and its See More expander show again (fixes the missing-topic regression from the GUILD_APP update).",
-				"Only the message area, the call view and the members sidebar are swapped for the lock screen; the header toolbar is trimmed to just the mute button.",
-				"Fixed the lock screen not centering on hidden voice channels.",
-				"Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.",
-				"Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back."
 			]
 		}
 	]

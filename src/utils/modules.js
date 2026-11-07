@@ -56,6 +56,40 @@ const {
 // @ts-expect-error
 const WebpackModules = BdApi.Webpack;
 
+/**
+ * @param {any} mod
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function findClass(mod, name) {
+	if (typeof mod[name] === "string") return mod[name];
+
+	const prefix = `${name}_`;
+	return Object.values(mod).find(
+		(value) =>
+			typeof value === "string" && value.split(" ")[0].startsWith(prefix),
+	);
+}
+
+/**
+ * Finds a CSS module containing every given class. Discord mangles CSS module
+ * keys (`{ TE: "chat_z_gUBg" }`), so classes are matched by value.
+ * @param {...string} names
+ * @returns {Record<string, string | undefined>}
+ */
+export function getClasses(...names) {
+	const mod = WebpackModules.getModule(
+		(m) =>
+			typeof m === "object" &&
+			m !== null &&
+			names.every((name) => findClass(m, name)),
+	);
+
+	return Object.fromEntries(
+		names.map((name) => [name, mod ? findClass(mod, name) : undefined]),
+	);
+}
+
 export function getModules() {
 	if (cachedModules) return cachedModules;
 	loaded_successfully = true;
@@ -118,7 +152,7 @@ export function getModules() {
 		Logger.err("Failed to load DiscordConstants", DiscordConstants);
 	}
 
-	const chat = WebpackModules.getByKeys("chat", "chatContent")?.chat;
+	const { chat } = getClasses("chat", "chatContent");
 
 	const Route = WebpackModules.getBySource(/.ImpressionTypes.PAGE,name:\w+,/);
 
@@ -165,10 +199,7 @@ export function getModules() {
 	const ChannelListStoreActionHandler =
 		getStoreActionHandler("ChannelListStore");
 
-	const container = WebpackModules.getByKeys(
-		"container",
-		"hubContainer",
-	)?.container;
+	const { container } = getClasses("container", "hubContainer");
 
 	const createChannelRecord = WebpackModules.getByKeys(
 		"createChannelRecord",
@@ -178,7 +209,7 @@ export function getModules() {
 	const DEFAULT_AVATARS =
 		WebpackModules.getByKeys("DEFAULT_AVATARS")?.DEFAULT_AVATARS;
 
-	const { iconItem, actionIcon } = WebpackModules.getByKeys("iconItem") || {};
+	const { iconItem, actionIcon } = getClasses("iconItem", "actionIcon");
 
 	const ReadStateStore = WebpackModules.getStore("ReadStateStore");
 	const Voice = WebpackModules.getByKeys("getVoiceStateStats");

@@ -228,23 +228,20 @@ export default (() => {
 		}
 
 		async start() {
-			const { Logger } = require("./utils/modules");
+			const { Logger, getClasses } = require("./utils/modules");
 
 			Logger.info(`Starting plugin...`);
 
 			await new Promise((resolve) => {
 				const start = Date.now();
 				const interval = setInterval(() => {
-					const container = BdApi.Webpack.getByKeys(
-						"container",
-						"hubContainer",
-					)?.container;
+					const { container } = getClasses("container", "hubContainer");
 					if (container) {
 						clearInterval(interval);
 						resolve();
 					} else if (Date.now() - start >= 10000) {
 						clearInterval(interval);
-						Logger.error("Timed out waiting for container module after 10s");
+						Logger.err("Timed out waiting for container module after 10s");
 						resolve();
 					}
 				}, 500);
