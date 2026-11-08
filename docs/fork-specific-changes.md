@@ -6,9 +6,9 @@ Ordinary upstream changes should be accepted unless they overlap one of the
 contracts below.
 
 The latest reviewed upstream boundary is
+[`250655e3`](https://github.com/JustOptimize/ShowHiddenChannels/commit/250655e388fe024d6aa3371b6b99c6bd4f9eeb05)
+on 2026-11-09, using
 [`30b6a23e`](https://github.com/JustOptimize/ShowHiddenChannels/commit/30b6a23ec154c69b2dbd5b477cde4dcd8876aa6e)
-on 2026-10-08, using
-[`0426b6bc`](https://github.com/JustOptimize/ShowHiddenChannels/commit/0426b6bc815491d1d1b0bd3475563ee3b32cea58)
 as the shared range base. Commit labels are abbreviated for readability; links
 target full SHAs.
 
@@ -148,32 +148,73 @@ fix at the reviewed boundary.
   expansion, settings interaction, and restart/cleanup have not been rechecked
   in the client for this range.
 
+## Reviewed integration: upstream v6.15
+
+The `30b6a23e..250655e3` range contains one commit fixing CSS discovery after
+Discord's rspack update.
+
+- Accepted: upstream's unchanged `findClass`/`getClasses` helper and all four
+  call-site changes: startup readiness, chat classes, container classes, and
+  hidden-channel icon classes. The helper accepts legacy named exports and
+  resolves mangled exports by their readable class-value prefixes, returning
+  complete composed values.
+- Adapted: adopted version 6.15 and prepended its changelog entry while retaining
+  fork attribution and every existing historical entry. Regression fixtures now
+  expose the actual mangled CSS objects through `getModule`, with no legacy CSS
+  `getByKeys` stubs that could conceal a reverted consumer.
+- Retained: all protected fork contracts above, including voice/stage badges and
+  locked navigation, native headers and cleanup, route fallback, normal message
+  fetching, the isolated experiment override, dispatcher compatibility, settings
+  state, guarded module discovery, updater routing, and publication boundaries.
+  No additional fork-specific runtime rspack adaptation was justified.
+- Upstream-owned correction: the container-readiness timeout now uses
+  `Logger.err` upstream too. Its behavior and regression test remain; it is no
+  longer a distinct local adaptation. The callable renderer guard below remains
+  necessary because upstream has not supplied equivalent validation.
+- Verification: inspected public Stable web build 667580, version hash
+  `7f6f109b760a6a8abddc126518351081780500c5`. Modules 999900, 168095, and 964306
+  provide the exact chat, container, and icon CSS pairs used in the regression
+  fixtures. Upstream's first-token matcher resolves all three, preserving the
+  composed `iconItem` value. An unrelated badge module's secondary
+  `hubContainer` token does not satisfy the production container pair and did
+  not justify broadening the helper. The current shipped native Channel class
+  retains all required hook methods and DOM class prefixes; the voice/stage
+  selector needles and badge shapes also remain present in their respective
+  functions. All 13 focused startup/CSS regressions, source parsing, metadata
+  checks, and protected-source comparisons passed. Biome lint checks passed;
+  unchanged formatting differences in `src/index.js` also exist at the prior
+  fork revision and were retained to avoid unrelated changes.
+- Evidence limit: downloaded source and mocked execution do not establish
+  current-client module identity, native header/badge rendering, settings
+  interaction, experiment results, or stop/restart cleanup on the rspack build.
+
 ## Optional upstream bug fixes
 
-These are narrow fixes for failure paths also present at upstream `30b6a23e`,
-not permanent fork behavior overrides. Reevaluate them during upstream reviews
-and prefer an equivalent upstream fix. Remove the corresponding local adaptation
+This narrow fix addresses a failure path still present at upstream `250655e3`;
+it is not a permanent fork behavior override. Reevaluate it during upstream reviews
+and prefer an equivalent upstream fix. Remove the local adaptation
 once the upstream replacement passes the relevant regression checks; the tests
 should continue covering the intended behavior.
 
 | Fix | Reproduced failure | Local adaptation | When it can be dropped |
 | --- | --- | --- | --- |
 | Missing mapped channel renderer | `getMangled()` can return an empty object or a mapping without a callable `render`. The loader's top-level checks accept that object and report success even though channel-row patching has no valid target. | Validate `ChannelItemRenderer.render` as a function and use the existing failed-module startup gate when it is unavailable. Keep upstream's lookup expression unchanged. | Upstream validates the callable export or provides equivalent handling that prevents false-success startup with an unusable renderer. |
-| Container-readiness timeout | The ten-second timeout calls `Logger.error`, but SHC's logger exports `err`. The callback throws after clearing its interval and before resolving the readiness promise, leaving startup pending. | Call the existing `Logger.err` method; preserve the timeout and its normal continuation into module validation. | Upstream handles this timeout without an invalid logger call or an indefinitely pending startup. |
 
-Source locations are `src/utils/modules.js:getModules()` and
-`src/index.js:start()`. These fixes do not change channel permissions, message
-fetching, icons, experiment overrides, settings, update routing, or publication.
-They are distinct from the protected fork behavior listed above.
+The remaining local correction is in `src/utils/modules.js:getModules()`.
+It does not change channel permissions, message fetching, icons, experiment
+overrides, settings, update routing, or publication. It is distinct from the
+protected fork behavior listed above.
 
 Verification uses `pnpm run test:unit` and
 `tests/startup-regressions.test.cjs`, which executes the actual module loader,
 plugin startup method, and exported logger with mocked BetterDiscord modules and
 timers. Replaying the same seven tests against pre-fix commit `d822b5e` produced
-five expected failures and two passing controls; all seven pass with these fixes.
+five expected failures and two passing controls; all seven passed with these fixes.
 Coverage includes invalid renderer exports, recovery after unloading the module
 cache, timeout logging and completion into the broken-module gate, and normal
-startup. This proves the isolated failure paths; it is not a live Discord result.
+startup. The v6.15 suite retains those assertions and adds six CSS discovery and
+consumer checks, passing all 13 tests. This proves the isolated failure paths;
+it is not a live Discord result.
 
 ## Source and commit map
 

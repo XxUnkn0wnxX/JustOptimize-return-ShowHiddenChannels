@@ -32,7 +32,46 @@ function compile(sourcePath, { require: localRequire, globals = {} }) {
 	return module.exports;
 }
 
-function createEnvironment({ renderer = () => ({ render() {} }) } = {}) {
+// CSS exports captured from Discord Stable web build 667580 on 2026-11-09.
+// Keep the mangled keys and complete class values to exercise real discovery.
+const namedChatCssModule = {
+	chat: "chat_z_gUBg",
+	chatContent: "chatContent_z_gUBg",
+};
+
+const chatCssModule = {
+	TE: "chat_z_gUBg",
+	q2: "chatContent_z_gUBg",
+};
+
+const containerCssModule = {
+	kL: "container_H5ozaj",
+	r0: "hubContainer_H5ozaj",
+};
+
+const iconCssModule = {
+	Xs: "iconItem_Wx6SnQ iconBase_Wx6SnQ",
+	gE: "actionIcon_Wx6SnQ",
+};
+
+const unrelatedBadgeCssModule = {
+	zr: "verified_tbg0LG background_tbg0LG",
+	PF: "staff_tbg0LG background_tbg0LG",
+	_I: "partnered_tbg0LG background_tbg0LG",
+	e4: "hub_tbg0LG hubContainer_tbg0LG background_tbg0LG",
+	Kk: "icon_tbg0LG",
+	Il: "verifiedHub_tbg0LG hubContainer_tbg0LG background_tbg0LG",
+};
+
+function createEnvironment({
+	renderer = () => ({ render() {} }),
+	cssModules = [
+		chatCssModule,
+		unrelatedBadgeCssModule,
+		containerCssModule,
+		iconCssModule,
+	],
+} = {}) {
 	const logs = [];
 	const console = Object.fromEntries(
 		["log", "warn", "error"].map((method) => [
@@ -74,11 +113,8 @@ function createEnvironment({ renderer = () => ({ render() {} }) } = {}) {
 		},
 		getMember: { getMember() {}, isMember() {} },
 		setLocale: { setLocale() {} },
-		"chat,chatContent": { chat: "chat" },
 		getChannelPermissions: { can() {} },
 		"dispatch,subscribe": dispatcher,
-		"container,hubContainer": () =>
-			containerAvailable ? { container: "container" } : undefined,
 		createChannelRecord: {
 			createChannelRecord(value) {
 				return value;
@@ -87,7 +123,6 @@ function createEnvironment({ renderer = () => ({ render() {} }) } = {}) {
 		DEFAULT_AVATARS: {
 			DEFAULT_AVATARS: ["https://example.invalid/avatar.png"],
 		},
-		iconItem: { iconItem: "icon", actionIcon: "action" },
 		getVoiceStateStats: { getChannelId() {} },
 		handleUserContextMenu: { react() {} },
 		"isCollapsed,getCollapsedCategories": { isCollapsed() {} },
@@ -95,7 +130,13 @@ function createEnvironment({ renderer = () => ({ render() {} }) } = {}) {
 	const webpack = {
 		Filters: { byStrings: (...needles) => ({ needles }) },
 		getModule: (filter) => {
-			const candidates = [{ ADD_REACTIONS: 1 }, { GUILD_VOICE: 2 }];
+			const candidates = [
+				{ ADD_REACTIONS: 1 },
+				{ GUILD_VOICE: 2 },
+				...cssModules.filter(
+					(module) => module !== containerCssModule || containerAvailable,
+				),
+			];
 			return candidates.find(filter);
 		},
 		getByKeys: (...keys) => {
@@ -224,6 +265,110 @@ test("module validation accepts a renderer with a render function", () => {
 	);
 });
 
+test("getClasses supports legacy named CSS keys", () => {
+	const environment = createEnvironment({ cssModules: [namedChatCssModule] });
+
+	assert.deepEqual(
+		environment.moduleExports.getClasses("chat", "chatContent"),
+		{
+			chat: "chat_z_gUBg",
+			chatContent: "chatContent_z_gUBg",
+		},
+	);
+});
+
+test("getClasses finds captured mangled CSS keys and preserves composed values", () => {
+	const environment = createEnvironment({ cssModules: [iconCssModule] });
+
+	assert.deepEqual(
+		environment.moduleExports.getClasses("iconItem", "actionIcon"),
+		{
+			iconItem: "iconItem_Wx6SnQ iconBase_Wx6SnQ",
+			actionIcon: "actionIcon_Wx6SnQ",
+		},
+	);
+});
+
+test("getClasses skips unrelated CSS and selects the exact container class pair", () => {
+	const unrelatedEnvironment = createEnvironment({
+		cssModules: [unrelatedBadgeCssModule],
+	});
+	assert.deepEqual(
+		unrelatedEnvironment.moduleExports.getClasses("container", "hubContainer"),
+		{ container: undefined, hubContainer: undefined },
+	);
+
+	const environment = createEnvironment({
+		cssModules: [unrelatedBadgeCssModule, containerCssModule],
+	});
+
+	assert.deepEqual(
+		environment.moduleExports.getClasses("container", "hubContainer"),
+		{
+			container: "container_H5ozaj",
+			hubContainer: "hubContainer_H5ozaj",
+		},
+	);
+});
+
+test("module loading exposes all three captured CSS module results", () => {
+	const environment = createEnvironment();
+	const modules = environment.moduleExports.getModules();
+
+	assert.deepEqual(
+		{
+			chat: modules.chat,
+			container: modules.container,
+			iconItem: modules.iconItem,
+			actionIcon: modules.actionIcon,
+		},
+		{
+			chat: "chat_z_gUBg",
+			container: "container_H5ozaj",
+			iconItem: "iconItem_Wx6SnQ iconBase_Wx6SnQ",
+			actionIcon: "actionIcon_Wx6SnQ",
+		},
+	);
+});
+
+test("getClasses does not combine requested classes from separate modules", () => {
+	const environment = createEnvironment({
+		cssModules: [
+			{ chat: "chat_z_gUBg" },
+			{ chatContent: "chatContent_z_gUBg" },
+		],
+	});
+
+	assert.deepEqual(
+		environment.moduleExports.getClasses("chat", "chatContent"),
+		{
+			chat: undefined,
+			chatContent: undefined,
+		},
+	);
+});
+
+test("missing CSS classes return undefined and fail module validation", () => {
+	const environment = createEnvironment({
+		cssModules: [containerCssModule, iconCssModule],
+	});
+
+	assert.deepEqual(
+		environment.moduleExports.getClasses("chat", "chatContent"),
+		{
+			chat: undefined,
+			chatContent: undefined,
+		},
+	);
+	environment.moduleExports.getModules();
+	assert.equal(environment.moduleExports.loaded_successfully, false);
+	assert.ok(
+		environment.logs.some(({ args }) =>
+			args.includes("Variable not found: chat"),
+		),
+	);
+});
+
 for (const [description, renderer] of [
 	["missing renderer export", {}],
 	["undefined renderer method", { render: undefined }],
@@ -310,6 +455,7 @@ test("startup timeout logs and reaches the broken-module gate", async () => {
 test("startup proceeds when the container becomes ready", async () => {
 	let callback;
 	const environment = createEnvironment();
+	environment.setContainerAvailable(false);
 	const plugin = loadPlugin(environment, {
 		timers: {
 			setInterval(fn) {
@@ -321,6 +467,7 @@ test("startup proceeds when the container becomes ready", async () => {
 	});
 	const starting = plugin.start();
 	await Promise.resolve();
+	environment.setContainerAvailable(true);
 	assert.doesNotThrow(callback);
 	await starting;
 
