@@ -308,7 +308,7 @@ export default (() => {
 		}
 
 		async start() {
-			const { Logger } = require("./utils/modules");
+			const { Logger, getClasses } = require("./utils/modules");
 
 			Logger.info(`Starting plugin...`);
 			Logger.isDebugging = this.settings.debugMode;
@@ -316,10 +316,7 @@ export default (() => {
 			await new Promise((resolve) => {
 				const start = Date.now();
 				const interval = setInterval(() => {
-					const container = BdApi.Webpack.getByKeys(
-						"container",
-						"hubContainer",
-					)?.container;
+					const { container } = getClasses("container", "hubContainer");
 					if (container) {
 						clearInterval(interval);
 						resolve();
