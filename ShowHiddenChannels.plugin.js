@@ -1,7 +1,7 @@
 /**
  * @name ShowHiddenChannels
  * @displayName Show Hidden Channels (SHC)
- * @version 6.14
+ * @version 6.15
  * @author JustOptimize (Oggetto), XxUnkn0wnxX (AI)
  * @authorId 619203349954166804
  * @source https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/tree/main
@@ -1086,6 +1086,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Logger: () => (/* binding */ Logger),
 /* harmony export */   UnloadModules: () => (/* binding */ UnloadModules),
+/* harmony export */   getClasses: () => (/* binding */ getClasses),
 /* harmony export */   getModules: () => (/* binding */ getModules),
 /* harmony export */   loaded_successfully: () => (/* binding */ loaded_successfully)
 /* harmony export */ });
@@ -1150,6 +1151,40 @@ const {
 // @ts-expect-error
 const WebpackModules = BdApi.Webpack;
 
+/**
+ * @param {any} mod
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function findClass(mod, name) {
+	if (typeof mod[name] === "string") return mod[name];
+
+	const prefix = `${name}_`;
+	return Object.values(mod).find(
+		(value) =>
+			typeof value === "string" && value.split(" ")[0].startsWith(prefix),
+	);
+}
+
+/**
+ * Finds a CSS module containing every given class. Discord mangles CSS module
+ * keys (`{ TE: "chat_z_gUBg" }`), so classes are matched by value.
+ * @param {...string} names
+ * @returns {Record<string, string | undefined>}
+ */
+function getClasses(...names) {
+	const mod = WebpackModules.getModule(
+		(m) =>
+			typeof m === "object" &&
+			m !== null &&
+			names.every((name) => findClass(m, name)),
+	);
+
+	return Object.fromEntries(
+		names.map((name) => [name, mod ? findClass(mod, name) : undefined]),
+	);
+}
+
 function getModules() {
 	if (cachedModules) return cachedModules;
 	loaded_successfully = true;
@@ -1207,7 +1242,7 @@ function getModules() {
 		Logger.err("Failed to load DiscordConstants", DiscordConstants);
 	}
 
-	const chat = WebpackModules.getByKeys("chat", "chatContent")?.chat;
+	const { chat } = getClasses("chat", "chatContent");
 
 	const Route = WebpackModules.getBySource(/.ImpressionTypes.PAGE,name:\w+,/);
 
@@ -1256,10 +1291,7 @@ function getModules() {
 		fluxDispatcher,
 	);
 
-	const container = WebpackModules.getByKeys(
-		"container",
-		"hubContainer",
-	)?.container;
+	const { container } = getClasses("container", "hubContainer");
 
 	const createChannelRecord = BdApi.Webpack.getByKeys(
 		"createChannelRecord",
@@ -1268,7 +1300,7 @@ function getModules() {
 	const DEFAULT_AVATARS =
 		WebpackModules.getByKeys("DEFAULT_AVATARS")?.DEFAULT_AVATARS;
 
-	const { iconItem, actionIcon } = WebpackModules.getByKeys("iconItem") || {};
+	const { iconItem, actionIcon } = getClasses("iconItem", "actionIcon");
 
 	const ReadStateStore = WebpackModules.getStore("ReadStateStore");
 	const Voice = WebpackModules.getByKeys("getVoiceStateStats");
@@ -1478,11 +1510,11 @@ const config = {
 		],
 		description:
 			"A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
-		version: "6.14",
+		version: "6.15",
 		github: `https://github.com/${"XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels"}/tree/main`,
 	},
 
-	changelog: [{"title":"v6.14 - Discord Update","type":"fixed","items":["Fixed the hidden channel lock icon and role pills missing after a Discord update."]},{"title":"v6.13 - Discord Dispatcher Update","type":"fixed","items":["Upstream fixed startup after Discord's dispatcher update (#291); this fork already included current and legacy dispatcher support in v6.12."]},{"title":"v6.12 - Native Channel Header","type":"changed","items":["Hidden channels now keep Discord's real header, including its formatted topic and See More expander.","Hidden and visible locked voice/stage channels replace their content with channel information and hide side panels; the native header toolbar retains the mute button where available.","Fixed the lock screen not centering on hidden voice channels.","Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.","Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.","Restored startup compatibility with Discord's current dispatcher storage.","Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.","Settings selections now update immediately while the panel remains open.","Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."]},{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
+	changelog: [{"title":"v6.15 - Discord Update","type":"fixed","items":["Fixed the plugin not working after Discord's rspack update (#294)."]},{"title":"v6.14 - Discord Update","type":"fixed","items":["Fixed the hidden channel lock icon and role pills missing after a Discord update."]},{"title":"v6.13 - Discord Dispatcher Update","type":"fixed","items":["Upstream fixed startup after Discord's dispatcher update (#291); this fork already included current and legacy dispatcher support in v6.12."]},{"title":"v6.12 - Native Channel Header","type":"changed","items":["Hidden channels now keep Discord's real header, including its formatted topic and See More expander.","Hidden and visible locked voice/stage channels replace their content with channel information and hide side panels; the native header toolbar retains the mute button where available.","Fixed the lock screen not centering on hidden voice channels.","Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.","Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.","Restored startup compatibility with Discord's current dispatcher storage.","Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.","Settings selections now update immediately while the panel remains open.","Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."]},{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
 
 	main: "ShowHiddenChannels.plugin.js",
 	github_short: "XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels",
@@ -1769,7 +1801,7 @@ const config = {
 		}
 
 		async start() {
-			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
+			const { Logger, getClasses } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
 
 			Logger.info(`Starting plugin...`);
 			Logger.isDebugging = this.settings.debugMode;
@@ -1777,10 +1809,7 @@ const config = {
 			await new Promise((resolve) => {
 				const start = Date.now();
 				const interval = setInterval(() => {
-					const container = BdApi.Webpack.getByKeys(
-						"container",
-						"hubContainer",
-					)?.container;
+					const { container } = getClasses("container", "hubContainer");
 					if (container) {
 						clearInterval(interval);
 						resolve();
