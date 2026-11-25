@@ -6,9 +6,9 @@ Ordinary upstream changes should be accepted unless they overlap one of the
 contracts below.
 
 The latest reviewed upstream boundary is
+[`8966eb2d`](https://github.com/JustOptimize/ShowHiddenChannels/commit/8966eb2dde3100a35cfbade458ff73c4ea005fba)
+on 2026-11-25, using
 [`250655e3`](https://github.com/JustOptimize/ShowHiddenChannels/commit/250655e388fe024d6aa3371b6b99c6bd4f9eeb05)
-on 2026-11-09, using
-[`30b6a23e`](https://github.com/JustOptimize/ShowHiddenChannels/commit/30b6a23ec154c69b2dbd5b477cde4dcd8876aa6e)
 as the shared range base. Commit labels are abbreviated for readability; links
 target full SHAs.
 
@@ -29,12 +29,13 @@ target full SHAs.
 | Area | Upstream behavior | Fork contract | Merge rule |
 | --- | --- | --- | --- |
 | Channel discovery | Uses Discord's `createChannelRecord` factory and a local `VIEW_CHANNEL` permission predicate. | Uses the same current Discord model through BetterDiscord's `BdApi.Webpack`, with guarded lookup and synthetic category permission overwrites. `WebpackModules` is an alias of that same API. | Treat the model fix as upstream-owned. Accept equivalent upstream lookup code while keeping the stronger function guard unless upstream provides a better equivalent. |
-| Hidden-channel predicate | Rejects non-channel values, direct messages, and Discord's `browse`, `customize`, and `guide` pseudo-channels. | Uses the same exclusions in the fork's `isHiddenChannel` helper, which is also used by locked-voice and experiment-related paths. | Port future predicate hardening without renaming the fork helper or bypassing its callers. |
+| Hidden-channel predicate | Rejects non-channel values, direct messages, and Discord's `browse`, `customize`, and `guide` pseudo-channels. | Uses the same exclusions in the fork's `isHiddenChannel` helper, which also serves the voice and stage information view. | Port future predicate hardening without renaming the fork helper or bypassing its callers. |
 | Native channel view and topics | Keeps Discord's native header while replacing hidden-channel content and sidebars; removes the separate topic-renderer lookup. | Uses the native header for hidden and visible locked voice/stage channels. Preserves the header when replacing the call view, installs hooks only after checking the captured view, and restores instance toolbar patches on stop. If capture fails, the route information screen displays available non-forum/media topics as plain text. Topic discovery cannot block startup. | Prefer native rendering. Preserve locked-channel handling, hook cleanup, and the route fallback; do not restore a separate topic lookup without a demonstrated need. |
-| Dispatcher storage | Resolves handlers by dispatch token from the store's own dispatcher `_nodes` Map. | Uses the same current lookup with guards and a legacy-graph fallback. The isolated experiment hotfix uses the same compatible node enumeration. Missing required handlers still fail module validation. | Preserve both dispatcher layouts and the existing failure gate until a reviewed upstream replacement covers them. |
+| Dispatcher storage | Resolves handlers by dispatch token from the store's own dispatcher `_nodes` Map. | Uses the same current lookup with guards and a legacy-graph fallback. Missing required handlers still fail module validation. | Preserve both dispatcher layouts and the existing failure gate until a reviewed upstream replacement covers them. |
 | Message loading | Stops message fetching for a channel classified as hidden. | Does not patch `MessageActions.fetchMessages`; Discord retains normal message and state refreshes for every channel. | Never restore fetch suppression as part of a routine upstream merge. |
-| Locked voice and stage channels | Uses the native header and information screen for hidden channels, and clears the icon selector's locked flag for hidden channels. | Hidden and visible non-connectable guild voice/stage rows replace Discord's generic padlock with the native channel-type icon and small lock badge. Other native icon states and locked tooltips remain intact; optional icon discovery failure retains Discord's original icon. Visible non-connectable rows open SHC's information screen. Native rendering and the route fallback distinguish locked from hidden channels and leave the current connected channel alone. | Preserve the fork navigation, distinct badged icons, information predicate, and fail-closed tree lookup. |
-| Private-channel-hiding experiment | Documents a manual `Not Eligible` override for Discord's `2026-02-private-channel-hiding` experiment. | Applies an isolated `Not Eligible` override at startup, verifies the resulting bucket, warns once on failure, and documents manual steps only as a fallback. | Keep the hotfix isolated; do not turn it into a general experiment framework. Remove it only after a reviewed replacement exists. |
+| Locked voice and stage channels | Opens an information screen for visible non-connectable voice rows and decouples hidden voice navigation from the icon setting. | Keeps native voice/stage icons, lock badges and tooltips. The guarded row handler opens the information screen for hidden and visible non-connectable vocal channels regardless of the custom indicator. Native rendering and the route fallback distinguish locked from hidden channels and leave the current connected channel alone. Visible locked records use channel-specific join-permission entries. | Preserve the fork navigation, distinct badged icons, information predicate, and guarded row lookup. |
+| Redacted channel metadata | Detects obfuscated records and omits placeholder permissions, bitrate and forum details. | Also omits placeholder last-message dates and fallback topics. Keeps available optional fields and the creation date. Guild-wide administrator roles follow the existing settings modes. | Apply redaction handling to both information-screen paths and keep genuine fields available on ordinary channel records. |
+| Private-channel-hiding experiment | Removes manual override instructions in v6.16. | The fork's automatic startup override, its diagnostics, and the manual instructions were retired in v6.16. Existing client experiment and cache data are left alone. | Retain ordinary startup and shared store-handler discovery. |
 | Build metadata and self-updates | Uses upstream repository metadata and stable releases by default, with opt-in prerelease updates. | Resolves the repository from explicit `--env updateRepo`, `SHC_GITHUB_REPOSITORY`, Actions' `GITHUB_REPOSITORY`, or the checkout's GitHub `origin`, then falls back to upstream. The resolved repository stamps `@source`, `@updateUrl`, and the runtime route. Fork builds consume only the stable rolling `Nightly-Fork` release; prereleases are unsupported. | Preserve repository-derived metadata and the stable-only updater policy. Never hardcode this fork into generated runtime logic. |
 | Publication | Uses upstream's release process. | Keeps `develop` source-only with no tracked root plugin, while `main` tracks the Actions-generated `ShowHiddenChannels.plugin.js`. Builds only for pushes or manual dispatches on `main`, commits only that generated file, and passes its exact bytes and commit SHA to publication. Publishing deletes and recreates `Nightly-Fork`, attaches exactly one explicit plugin asset, and relies on GitHub for source archives. | Keep the branch-specific artifact boundary and the split build/publish chain with its ancestry, metadata, freshness, and byte-identity gates. |
 | Attribution | Credits the upstream author and repository. | Keeps the original author ID while adding `XxUnkn0wnxX (AI)` to fork-facing author metadata. Generated source and update links remain repository-derived. | Preserve both upstream credit and fork attribution. |
@@ -188,9 +189,39 @@ Discord's rspack update.
   current-client module identity, native header/badge rendering, settings
   interaction, experiment results, or stop/restart cleanup on the rspack build.
 
+## Reviewed integration: upstream v6.16
+
+The [v6.15 to v6.16 range](https://github.com/JustOptimize/ShowHiddenChannels/compare/v6.15...v6.16)
+covers [`9c39699`](https://github.com/JustOptimize/ShowHiddenChannels/commit/9c396991354eb93fd79004a7f874fd0363c97474),
+[`603284a`](https://github.com/JustOptimize/ShowHiddenChannels/commit/603284a509f344ddc4e4b7872694962804c88476),
+and [`8966eb2`](https://github.com/JustOptimize/ShowHiddenChannels/commit/8966eb2dde3100a35cfbade458ff73c4ea005fba).
+
+- Adopted obfuscation detection, the unavailable-metadata notice and optional
+  field handling. The fork additionally guards the fallback topic and
+  last-message date. Ordinary records still show the genuine information
+  available to the client. The admin-role fallback to all server admins was
+  skipped to preserve the selected display mode.
+- Adapted join-permission display for visible locked voice and stage channels.
+  Lists use channel-specific overwrites. Member entries require both
+  `VIEW_CHANNEL` and `CONNECT` in the locked view. The existing fork route and
+  native headers, badges and toolbar cleanup cover both hidden and locked views.
+  Voice and stage navigation is independent of the hidden-channel icon setting;
+  the custom indicator renders only for the Lock and Eye choices.
+- Removed the startup experiment override and its dedicated helpers,
+  diagnostics and override instructions. Store-action-handler discovery
+  still supports both dispatcher layouts. Normal message fetching, guarded
+  renderer discovery and the repository-derived stable updater are retained.
+- Advanced the dotted version value and added a first changelog entry while
+  preserving the existing parser schema, fork attribution and changelog
+  history. The source-only `develop` and generated-plugin `main` policy is unchanged.
+- Verified all 16 unit tests, focused voice/stage row cases, 633 native-header
+  and cleanup assertions, 76 native badge assertions, and an isolated webpack
+  compile. The header and badge harnesses use captured Discord code with
+  mocked dependencies. Current Discord UI behavior requires a client test.
+
 ## Optional upstream bug fixes
 
-This narrow fix addresses a failure path still present at upstream `250655e3`;
+This narrow fix addresses a failure path still present at upstream `8966eb2d`;
 it is not a permanent fork behavior override. Reevaluate it during upstream reviews
 and prefer an equivalent upstream fix. Remove the local adaptation
 once the upstream replacement passes the relevant regression checks; the tests
@@ -281,9 +312,9 @@ while normally one merge-marker commit ahead. Verify source and documentation
 parity by excluding only `ShowHiddenChannels.plugin.js`; never force the
 branches to identical SHAs.
 
-### Private-channel-hiding hotfix
+### Retired private-channel-hiding hotfix
 
-Primary file: `src/index.js`.
+The following entries record the historical override and its documentation.
 
 Key commits:
 

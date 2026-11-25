@@ -1,7 +1,7 @@
 {
 	"name": "ShowHiddenChannels",
 	"displayName": "Show Hidden Channels (SHC)",
-	"version": "6.15",
+	"version": "6.16",
 	"author": "JustOptimize (Oggetto), XxUnkn0wnxX (AI)",
 	"authorId": "619203349954166804",
 	"source": "https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/tree/main",
@@ -10,6 +10,15 @@
 	"description": "A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
 	"runAt": "idle",
 	"changelog": [
+		{
+			"title": "v6.16 - Obfuscated channels",
+			"type": "changed",
+			"items": [
+				"The information screen shows the metadata Discord still provides and omits placeholder channel details.",
+				"Removed the obsolete private-channel experiment override.",
+				"Hidden voice and stage channels open their information screen with the icon set to None. Visible locked channels show channel-specific join permissions."
+			]
+		},
 		{
 			"title": "v6.15 - Discord Update",
 			"type": "fixed",

@@ -9,6 +9,7 @@ import UserMentionsComponent from "./UserMentionsComponent";
 
 const {
 	Components: { TextElement },
+	DiscordConstants,
 	GuildStore,
 	GuildRoleStore,
 	React,
@@ -36,9 +37,14 @@ export const Lockscreen = React.memo(
 		},
 	) => {
 		const guild = GuildStore.getGuild(channel.guild_id);
-		const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id);
+		const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id) ?? {};
+		const obfuscated = channel.isObfuscated?.() ?? false;
 		const topic =
-			showTopic && ![15, 16].includes(channel.type) ? channel.topic : null;
+			!obfuscated && showTopic && ![15, 16].includes(channel.type)
+				? channel.topic
+				: null;
+		const { CONNECT, VIEW_CHANNEL } = DiscordConstants.Permissions;
+		const permission = isLockedVoiceChannel ? CONNECT : VIEW_CHANNEL;
 
 		return (
 			<div
@@ -144,7 +150,7 @@ export const Lockscreen = React.memo(
 					)}
 
 					{/* Bitrate */}
-					{channel.bitrate && channel.type === 2 && (
+					{!obfuscated && channel.bitrate && channel.type === 2 && (
 						<TextElement
 							color={TextElement.Colors.STANDARD}
 							size={TextElement.Sizes.SIZE_14}
@@ -165,7 +171,7 @@ export const Lockscreen = React.memo(
 					</TextElement>
 
 					{/* Last message */}
-					{channel.lastMessageId && (
+					{!obfuscated && channel.lastMessageId && (
 						<TextElement
 							color={TextElement.Colors.STANDARD}
 							size={TextElement.Sizes.SIZE_14}
@@ -174,8 +180,7 @@ export const Lockscreen = React.memo(
 						</TextElement>
 					)}
 
-					{/* Permissions */}
-					{settings.showPerms && channel.permissionOverwrites && (
+					{obfuscated && (
 						<div
 							style={{
 								margin: "16px auto 0 auto",
@@ -185,32 +190,65 @@ export const Lockscreen = React.memo(
 								color: "var(--text-default)",
 							}}
 						>
-							{/* Users */}
-							<UserMentionsComponent
-								channel={channel}
-								guild={guild}
-								settings={settings}
-							/>
-
-							{/* Channel Roles */}
-							<ChannelRolesComponent
-								channel={channel}
-								guild={guild}
-								settings={settings}
-								roles={guildRoles}
-							/>
-
-							{/* Admin Roles */}
-							<AdminRolesComponent
-								guild={guild}
-								settings={settings}
-								roles={guildRoles}
-							/>
+							<TextElement
+								color={TextElement.Colors.STANDARD}
+								size={TextElement.Sizes.SIZE_14}
+							>
+								Discord does not share this channel's name, topic, or
+								permissions with your account.
+							</TextElement>
+							{settings.showPerms && guild && (
+								<AdminRolesComponent
+									guild={guild}
+									settings={settings}
+									roles={guildRoles}
+								/>
+							)}
 						</div>
 					)}
 
+					{/* Permissions from the channel's own overwrite entries. */}
+					{!obfuscated &&
+						settings.showPerms &&
+						guild &&
+						channel.permissionOverwrites && (
+							<div
+								style={{
+									margin: "16px auto 0 auto",
+									backgroundColor: "var(--bg-surface-raised)",
+									padding: 10,
+									borderRadius: 5,
+									color: "var(--text-default)",
+								}}
+							>
+								{/* Users */}
+								<UserMentionsComponent
+									channel={channel}
+									guild={guild}
+									settings={settings}
+									permission={permission}
+								/>
+
+								{/* Channel Roles */}
+								<ChannelRolesComponent
+									channel={channel}
+									guild={guild}
+									settings={settings}
+									roles={guildRoles}
+									permission={permission}
+								/>
+
+								{/* Admin Roles */}
+								<AdminRolesComponent
+									guild={guild}
+									settings={settings}
+									roles={guildRoles}
+								/>
+							</div>
+						)}
+
 					{/* Forums */}
-					<ForumComponent channel={channel} />
+					{!obfuscated && <ForumComponent channel={channel} />}
 				</div>
 			</div>
 		);
