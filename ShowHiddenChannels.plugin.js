@@ -1,7 +1,7 @@
 /**
  * @name ShowHiddenChannels
  * @displayName Show Hidden Channels (SHC)
- * @version 6.15
+ * @version 6.16
  * @author JustOptimize (Oggetto), XxUnkn0wnxX (AI)
  * @authorId 619203349954166804
  * @source https://github.com/XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels/tree/main
@@ -101,24 +101,27 @@ function ChannelRolesComponent({
   channel,
   guild,
   settings,
-  roles
+  roles,
+  permission = DiscordConstants.Permissions.VIEW_CHANNEL
 }) {
-  const channelRoles = Object.values(channel.permissionOverwrites).filter(role => role !== undefined && role?.type === 0 && (
-  //* 1024n = VIEW_CHANNEL permission
-  //* 8n = ADMINISTRATOR permission
-  //* If role is ADMINISTRATOR it can view channel even if overwrites deny VIEW_CHANNEL
-  settings.showAdmin && (roles[role.id].permissions & BigInt(8)) === BigInt(8) ||
-  //* If overwrites allow VIEW_CHANNEL (it will override the default role permissions)
-  (role.allow & BigInt(1024)) === BigInt(1024) ||
-  //* If role can view channel by default and overwrites don't deny VIEW_CHANNEL
-  roles[role.id].permissions & BigInt(1024) && (role.deny & BigInt(1024)) === BigInt(0)));
+  const {
+    CONNECT
+  } = DiscordConstants.Permissions;
+  const permissionBits = BigInt(permission);
+  const channelRoles = Object.values(channel.permissionOverwrites).filter(overwrite => {
+    if (overwrite?.type !== 0) return false;
+    const role = roles[overwrite.id];
+    if (!role) return false;
+    const showAdmin = settings.showAdmin === "channel" || settings.showAdmin === "include" || settings.showAdmin === "exclude" && !role.tags?.bot_id;
+    return showAdmin && (role.permissions & 8n) === 8n || (overwrite.allow & permissionBits) === permissionBits || (role.permissions & permissionBits) === permissionBits && (overwrite.deny & permissionBits) === 0n;
+  });
   return BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     style: {
       borderTop: "1px solid var(--border-subtle)",
       padding: 8
     }
-  }, "Channel-specific roles:", BdApi.React.createElement("div", {
+  }, permission === CONNECT ? "Channel-specific roles with Connect:" : "Channel-specific roles:", BdApi.React.createElement("div", {
     style: {
       paddingTop: 8
     }
@@ -352,6 +355,7 @@ const {
   Components: {
     TextElement
   },
+  DiscordConstants,
   GuildStore,
   GuildRoleStore,
   React
@@ -374,8 +378,14 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
   showTopic = true
 }) => {
   const guild = GuildStore.getGuild(channel.guild_id);
-  const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id);
-  const topic = showTopic && ![15, 16].includes(channel.type) ? channel.topic : null;
+  const guildRoles = GuildRoleStore.getRolesSnapshot(guild?.id) ?? {};
+  const obfuscated = channel.isObfuscated?.() ?? false;
+  const topic = !obfuscated && showTopic && ![15, 16].includes(channel.type) ? channel.topic : null;
+  const {
+    CONNECT,
+    VIEW_CHANNEL
+  } = DiscordConstants.Permissions;
+  const permission = isLockedVoiceChannel ? CONNECT : VIEW_CHANNEL;
   return BdApi.React.createElement("div", {
     className: ["shc-hidden-chat-content", chat].filter(Boolean).join(" "),
     style: {
@@ -429,7 +439,7 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
   }, "Age-Restricted Channel (NSFW) \uD83D\uDD1E"), channel.isSpoilerChannel?.() && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
-  }, "Spoiler Channel \uD83D\uDC41\uFE0F"), channel.bitrate && channel.type === 2 && BdApi.React.createElement(TextElement, {
+  }, "Spoiler Channel \uD83D\uDC41\uFE0F"), !obfuscated && channel.bitrate && channel.type === 2 && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
   }, "Bitrate: ", channel.bitrate / 1000, "kbps"), BdApi.React.createElement(TextElement, {
@@ -438,10 +448,25 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
     style: {
       marginTop: 8
     }
-  }, "Created on: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.getDateFromSnowflake)(channel.id)), channel.lastMessageId && BdApi.React.createElement(TextElement, {
+  }, "Created on: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.getDateFromSnowflake)(channel.id)), !obfuscated && channel.lastMessageId && BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
-  }, "Last message sent: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.getDateFromSnowflake)(channel.lastMessageId)), settings.showPerms && channel.permissionOverwrites && BdApi.React.createElement("div", {
+  }, "Last message sent: ", (0,_utils_date__WEBPACK_IMPORTED_MODULE_0__.getDateFromSnowflake)(channel.lastMessageId)), obfuscated && BdApi.React.createElement("div", {
+    style: {
+      margin: "16px auto 0 auto",
+      backgroundColor: "var(--bg-surface-raised)",
+      padding: 10,
+      borderRadius: 5,
+      color: "var(--text-default)"
+    }
+  }, BdApi.React.createElement(TextElement, {
+    color: TextElement.Colors.STANDARD,
+    size: TextElement.Sizes.SIZE_14
+  }, "Discord does not share this channel's name, topic, or permissions with your account."), settings.showPerms && guild && BdApi.React.createElement(_AdminRolesComponent__WEBPACK_IMPORTED_MODULE_2__["default"], {
+    guild: guild,
+    settings: settings,
+    roles: guildRoles
+  })), !obfuscated && settings.showPerms && guild && channel.permissionOverwrites && BdApi.React.createElement("div", {
     style: {
       margin: "16px auto 0 auto",
       backgroundColor: "var(--bg-surface-raised)",
@@ -452,17 +477,19 @@ const Lockscreen = React.memo((/** @type {{ chat: string, channel: import('../di
   }, BdApi.React.createElement(_UserMentionsComponent__WEBPACK_IMPORTED_MODULE_5__["default"], {
     channel: channel,
     guild: guild,
-    settings: settings
+    settings: settings,
+    permission: permission
   }), BdApi.React.createElement(_ChannelRolesComponent__WEBPACK_IMPORTED_MODULE_3__["default"], {
     channel: channel,
     guild: guild,
     settings: settings,
-    roles: guildRoles
+    roles: guildRoles,
+    permission: permission
   }), BdApi.React.createElement(_AdminRolesComponent__WEBPACK_IMPORTED_MODULE_2__["default"], {
     guild: guild,
     settings: settings,
     roles: guildRoles
-  })), BdApi.React.createElement(_ForumComponent__WEBPACK_IMPORTED_MODULE_4__["default"], {
+  })), !obfuscated && BdApi.React.createElement(_ForumComponent__WEBPACK_IMPORTED_MODULE_4__["default"], {
     channel: channel
   })));
 });
@@ -754,7 +781,8 @@ const {
 function UserMentionsComponent({
   channel,
   guild,
-  settings
+  settings,
+  permission = DiscordConstants.Permissions.VIEW_CHANNEL
 }) {
   const [userMentionComponents, setUserMentionComponents] = React.useState(["Loading..."]);
   const fetchMemberAndMap = async () => {
@@ -774,11 +802,23 @@ function UserMentionsComponent({
         await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 1500) + 500));
       }
     }
-    const filteredUserOverwrites = Object.values(channel.permissionOverwrites).filter(user => Boolean(PermissionUtils.can({
-      permission: DiscordConstants.Permissions.VIEW_CHANNEL,
-      user: UserStore.getUser(user.id),
-      context: channel
-    }) && GuildMemberStore.isMember(guild.id, user.id)));
+    const {
+      CONNECT,
+      VIEW_CHANNEL
+    } = DiscordConstants.Permissions;
+    const filteredUserOverwrites = allUserOverwrites.filter(overwrite => {
+      const user = UserStore.getUser(overwrite.id);
+      if (!user || !GuildMemberStore.isMember(guild.id, user.id)) return false;
+      return PermissionUtils.can({
+        permission: VIEW_CHANNEL,
+        user,
+        context: channel
+      }) && (permission !== CONNECT || PermissionUtils.can({
+        permission: CONNECT,
+        user,
+        context: channel
+      }));
+    });
     if (!filteredUserOverwrites?.length) {
       return setUserMentionComponents(["None"]);
     }
@@ -792,11 +832,11 @@ function UserMentionsComponent({
   };
   React.useEffect(() => {
     fetchMemberAndMap();
-  }, [channel.id, guild.id, settings.showPerms, channel.permissionOverwrites]);
+  }, [channel.id, guild.id, settings.showPerms, channel.permissionOverwrites, permission]);
   return BdApi.React.createElement(TextElement, {
     color: TextElement.Colors.STANDARD,
     size: TextElement.Sizes.SIZE_14
-  }, "Users that can see this channel:", BdApi.React.createElement("div", {
+  }, permission === DiscordConstants.Permissions.CONNECT ? "Users with channel-specific permissions who can join:" : "Users with channel-specific permissions who can view:", BdApi.React.createElement("div", {
     style: {
       marginTop: 8,
       marginBottom: 8,
@@ -1017,35 +1057,9 @@ function getDateFromSnowflake(snowflake) {
 
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   getDispatcherNodes: () => (/* binding */ getDispatcherNodes),
 /* harmony export */   getStoreActionHandler: () => (/* binding */ getStoreActionHandler)
 /* harmony export */ });
 // @ts-check
-
-/**
- * @param {any} dispatcher
- * @returns {any[]}
- */
-function getDispatcherNodes(dispatcher) {
-	const actionHandlers = dispatcher?._actionHandlers;
-	const nodes = actionHandlers?._nodes;
-
-	if (typeof nodes?.values === "function") {
-		try {
-			return Array.from(nodes.values());
-		} catch {
-			// Fall through to the legacy dependency graph.
-		}
-	}
-
-	const legacyNodes = actionHandlers?._dependencyGraph?.nodes;
-	if (Array.isArray(legacyNodes)) return legacyNodes;
-	if (legacyNodes && typeof legacyNodes === "object") {
-		return Object.values(legacyNodes);
-	}
-
-	return [];
-}
 
 /**
  * @param {any} store
@@ -1473,8 +1487,7 @@ function checkVariables(modules) {
 /******/ 	/* webpack/runtime/make namespace object */
 /******/ 	// define __esModule on exports
 /******/ 	__webpack_require__.r = (exports) => {
-/******/ 		Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
-/******/ 		Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		Object.defineProperties(exports, { [Symbol.toStringTag]: { value: 'Module' }, __esModule: { value: true } });
 /******/ 	};
 /******/ 	
 /************************************************************************/
@@ -1490,10 +1503,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _styles_css__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ./styles.css */ "./src/styles.css");
 /* harmony import */ var _utils_channelIcons__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! ./utils/channelIcons */ "./src/utils/channelIcons.js");
-/* harmony import */ var _utils_dispatcher__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! ./utils/dispatcher */ "./src/utils/dispatcher.js");
 // @ts-check
 /** @typedef {import('./discord').SHCChannel} SHCChannel */
-
 
 
 
@@ -1510,11 +1521,11 @@ const config = {
 		],
 		description:
 			"A plugin which displays all hidden Channels and allows users to view information about them, this won't allow you to read them (impossible).",
-		version: "6.15",
+		version: "6.16",
 		github: `https://github.com/${"XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels"}/tree/main`,
 	},
 
-	changelog: [{"title":"v6.15 - Discord Update","type":"fixed","items":["Fixed the plugin not working after Discord's rspack update (#294)."]},{"title":"v6.14 - Discord Update","type":"fixed","items":["Fixed the hidden channel lock icon and role pills missing after a Discord update."]},{"title":"v6.13 - Discord Dispatcher Update","type":"fixed","items":["Upstream fixed startup after Discord's dispatcher update (#291); this fork already included current and legacy dispatcher support in v6.12."]},{"title":"v6.12 - Native Channel Header","type":"changed","items":["Hidden channels now keep Discord's real header, including its formatted topic and See More expander.","Hidden and visible locked voice/stage channels replace their content with channel information and hide side panels; the native header toolbar retains the mute button where available.","Fixed the lock screen not centering on hidden voice channels.","Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.","Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.","Restored startup compatibility with Discord's current dispatcher storage.","Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.","Settings selections now update immediately while the panel remains open.","Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."]},{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
+	changelog: [{"title":"v6.16 - Obfuscated channels","type":"changed","items":["The information screen shows the metadata Discord still provides and omits placeholder channel details.","Removed the obsolete private-channel experiment override.","Hidden voice and stage channels open their information screen with the icon set to None. Visible locked channels show channel-specific join permissions."]},{"title":"v6.15 - Discord Update","type":"fixed","items":["Fixed the plugin not working after Discord's rspack update (#294)."]},{"title":"v6.14 - Discord Update","type":"fixed","items":["Fixed the hidden channel lock icon and role pills missing after a Discord update."]},{"title":"v6.13 - Discord Dispatcher Update","type":"fixed","items":["Upstream fixed startup after Discord's dispatcher update (#291); this fork already included current and legacy dispatcher support in v6.12."]},{"title":"v6.12 - Native Channel Header","type":"changed","items":["Hidden channels now keep Discord's real header, including its formatted topic and See More expander.","Hidden and visible locked voice/stage channels replace their content with channel information and hide side panels; the native header toolbar retains the mute button where available.","Fixed the lock screen not centering on hidden voice channels.","Forum channels are labelled correctly instead of \"unknown\", and hidden spoiler channels now say so.","Refreshed dead Discord CSS variables so the permissions and forum panels have their background and text back.","Restored startup compatibility with Discord's current dispatcher storage.","Locked voice and stage channel padlocks now retain their channel-type symbol with Discord's native small lock badge.","Settings selections now update immediately while the panel remains open.","Native view and toolbar patches now restore cleanly when the plugin stops; failed view capture retains a plain-text topic fallback."]},{"title":"v6.11.1 - Discord Topic Compatibility","type":"fixed","items":["Restored hidden-channel topics after Discord added new channel types."]},{"title":"v6.11 - Discord Compatibility & Fork Publishing","type":"fixed","items":["Restored current Discord compatibility by using native VIEW_CHANNEL denials instead of the removed channel isHidden method.","Synthetic categories now use Discord's createChannelRecord factory.","An unavailable optional topic renderer no longer makes plugin startup fatal.","Builds now inject the resolved fork repository into self-updates, @source, and @updateUrl; fork builds use the stable rolling Nightly-Fork release and no longer support prereleases.","The split build and publisher workflows now publish the plugin alongside matching GitHub source archives."]},{"title":"v6.10 - Reliability Improvements","type":"fixed","items":["Plugin now waits for Discord to be ready before starting instead of using a fixed 1s delay.","Pre-release update checking now correctly picks the newest version instead of blindly grabbing the first GitHub release.","Logger is now exported directly so it's usable before modules are fully loaded.","Fixed console.debug being suppressed on Discord stable (falls back to console.log).","Fixed loaded_successfully flag not resetting on module refetch."]},{"title":"v6.9 - Lazy Module Loading","type":"changed","items":["Modules are now loaded lazily on first use instead of at import time, fixing startup failures when Discord's webpack isn't ready.","Added runAt: idle to ensure the plugin starts after Discord is fully loaded.","Dropped the 0. version prefix and fixed version comparison to be numeric.","Added pre-release version support (e.g. 6.9-pre1).","69... (nice)"]},{"title":"v0.6.8 - Fixes","type":"fixed","items":["Updated module queries after Discord update.","Added some typescript types","No longer 67 :("]}],
 
 	main: "ShowHiddenChannels.plugin.js",
 	github_short: "XxUnkn0wnxX/JustOptimize-return-ShowHiddenChannels",
@@ -1523,9 +1534,6 @@ const config = {
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = ((() => {
 	// biome-ignore lint/security/noGlobalEval: This is a necessary evil
 	const RuntimeRequire = eval("require");
-	const PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID =
-		"2026-02-private-channel-hiding";
-	const PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT = -1;
 	const UPSTREAM_REPOSITORY = "JustOptimize/ShowHiddenChannels";
 	const ROLLING_RELEASE_TAG = "Nightly-Fork";
 	const isForkBuild = config.github_short !== UPSTREAM_REPOSITORY;
@@ -1600,7 +1608,6 @@ const config = {
 			this.api = new BdApi(meta.name);
 
 			this.hiddenChannelCache = {};
-			this.privateChannelHidingHotfixWarnings = new Set();
 			this.lockedVoicePatchWarnings = new Set();
 
 			this.collapsed = {};
@@ -1873,7 +1880,6 @@ const config = {
 				this.api.Data.save("version", config.info.version);
 			}
 
-			this.applyPrivateChannelHidingExperimentHotfix();
 			DOMTools.addStyle(config.info.name, _styles_css__WEBPACK_IMPORTED_MODULE_0__["default"]);
 			this.Patch();
 			this.rerenderChannels();
@@ -1892,132 +1898,6 @@ const config = {
 			if (["browse", "customize", "guide"].includes(channel.id)) return false;
 
 			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
-		}
-
-		/**
-		 * Temporary hotfix for Discord's 2026-02-private-channel-hiding experiment.
-		 * Keep this isolated so it can be removed once SHC has a better long-term path.
-		 */
-		applyPrivateChannelHidingExperimentHotfix() {
-			const { Logger } = __webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js");
-			const experimentStore = this.getPrivateChannelHidingExperimentStore();
-			const currentVariant = this.getPrivateChannelHidingVariant(experimentStore);
-
-			if (!experimentStore || typeof currentVariant !== "number") {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"experiment-not-found",
-					`Experiment ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
-				);
-				return;
-			}
-
-			if (currentVariant === PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT) {
-				Logger.info(
-					`Private channel hiding experiment already reads Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}); refreshing visible override.`,
-				);
-			}
-
-			const dispatcher = this.getDiscordDispatcher();
-			if (typeof dispatcher?.dispatch !== "function") {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"dispatcher-not-found",
-					"Discord dispatcher not found; private-channel-hiding hotfix was not applied.",
-				);
-				return;
-			}
-
-			const hasApexOverrideHandler = this.getDispatcherNodes().some(
-				(node) =>
-					node?.name === "ApexExperimentStore" &&
-					typeof node?.actionHandler?.APEX_EXPERIMENT_OVERRIDE_CREATE ===
-						"function",
-			);
-
-			if (!hasApexOverrideHandler) {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"not-eligible-action-not-found",
-					`Not Eligible override action for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
-				);
-				return;
-			}
-
-			dispatcher.dispatch({
-				type: "APEX_EXPERIMENT_OVERRIDE_CREATE",
-				experimentName: PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
-				variantId: PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT,
-			});
-			Logger.info(
-				`Private channel hiding experiment override dispatched as Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}).`,
-			);
-
-			window.setTimeout(() => {
-				const nextVariant =
-					this.getPrivateChannelHidingVariant(experimentStore);
-
-				if (
-					nextVariant !== PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT
-				) {
-					this.warnPrivateChannelHidingHotfixOnce(
-						"not-eligible-not-applied",
-						`Not Eligible option for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} did not apply; current variant is ${String(nextVariant)}.`,
-					);
-					return;
-				}
-
-				Logger.info(
-					`Private channel hiding experiment forced to Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}). Restart Discord and delete Cache and Code Cache if channel names were already cached as No Access.`,
-				);
-			}, 500);
-		}
-
-		getPrivateChannelHidingExperimentStore() {
-			const Webpack = BdApi?.Webpack;
-			const candidates = [
-				Webpack?.getStore?.("ExperimentStore"),
-				Webpack?.getByKeys?.(
-					"getUserExperimentBucket",
-					"getUserExperimentDescriptor",
-				),
-				...this.getDispatcherNodes()
-					.filter((node) => node?.name === "ExperimentStore")
-					.map((node) => node?.store ?? node),
-			];
-
-			return candidates.find(
-				(candidate) =>
-					candidate && typeof candidate.getUserExperimentBucket === "function",
-			);
-		}
-
-		getPrivateChannelHidingVariant(experimentStore) {
-			try {
-				return experimentStore?.getUserExperimentBucket?.(
-					PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
-				);
-			} catch {
-				return undefined;
-			}
-		}
-
-		getDiscordDispatcher() {
-			const Webpack = BdApi?.Webpack;
-			return (
-				Webpack?.getStore?.("UserStore")?._dispatcher ||
-				Webpack?.getByKeys?.("dispatch", "subscribe", "unsubscribe", {
-					searchExports: true,
-				})
-			);
-		}
-
-		getDispatcherNodes() {
-			return (0,_utils_dispatcher__WEBPACK_IMPORTED_MODULE_2__.getDispatcherNodes)(this.getDiscordDispatcher());
-		}
-
-		warnPrivateChannelHidingHotfixOnce(key, message) {
-			if (this.privateChannelHidingHotfixWarnings.has(key)) return;
-
-			this.privateChannelHidingHotfixWarnings.add(key);
-			(__webpack_require__(/*! ./utils/modules */ "./src/utils/modules.js").Logger).warn(message);
 		}
 
 		warnLockedVoicePatchOnce(key, message, details) {
@@ -2367,104 +2247,61 @@ const config = {
 				return res;
 			});
 
-			if (this.settings.hiddenChannelIcon) {
-				if (!ChannelItemRenderer) {
-					this.api.UI.showToast(
-						"(SHC) ChannelItemRenderer module is missing, channel lock icon won't be shown.",
-						{
-							type: "warning",
-						},
-					);
-				}
-
+			// Keep voice navigation independent of the optional hidden-channel indicator.
+			if (typeof ChannelItemRenderer?.render !== "function") {
+				this.api.UI.showToast(
+					"(SHC) ChannelItemRenderer module is missing. Channel indicators and voice information links are unavailable.",
+					{ type: "warning" },
+				);
+			} else {
+				const rowTree = {
+					walkable: ["props", "children", "child", "sibling"],
+					maxRecursion: 100,
+				};
 				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
 					const [instance] =
-						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!this.isHiddenChannel(instance?.channel)) {
-						return res;
-					}
-
-					const item = res?.props?.children?.props;
-					if (item?.className) {
-						item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
-					}
-
-					const children = Utilities.findInTree(
-						res,
-						(m) =>
-							m?.props?.onClick?.toString().includes("stopPropagation") &&
-							m.type === "div",
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (children.props?.children) {
-						children.props.children = [
-							React.createElement(HiddenChannelIcon, {
-								icon: this.settings.hiddenChannelIcon,
-								iconItem: iconItem,
-								actionIcon: actionIcon,
-							}),
-						];
-					}
-
-					const isInCallInThisChannel =
-						instance.channel.type ===
-							DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
-					if (!isInCallInThisChannel) {
-						return res;
-					}
-
-					const wrapper = Utilities.findInTree(
-						res,
-						(channel) =>
-							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (!wrapper) {
-						return res;
-					}
-
-					wrapper.props.onMouseDown = () => {};
-					wrapper.props.onMouseUp = () => {};
-
-					const mainContent = wrapper?.props?.children[1]?.props?.children;
-
-					if (!mainContent) {
-						return res;
-					}
-
-					mainContent.props.onClick = () => {
-						if (instance.channel?.isGuildVocal()) {
-							NavigationUtils.transitionTo(
-								`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
-							);
-						}
-					};
-					mainContent.props.href = null;
-
-					return res;
-				});
-			}
-
-			//* Open SHC's channel information page for visible voice channels
-			//* that Discord shows but the current user cannot connect to.
-			if (ChannelItemRenderer) {
-				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
-					const [instance] =
-						/** @type {[{channel: SHCChannel}]} */ (args);
+						/** @type {[{channel: SHCChannel, connected?: boolean}]} */ (args);
 					const channel = instance?.channel;
+					if (!res || !channel) return res;
+
+					const hidden = this.isHiddenChannel(channel);
+					const rowProps = res?.props?.children?.props;
+					const hiddenRowClass = `shc-hidden-channel-type-${channel.type}`;
+					if (
+						hidden &&
+						typeof rowProps?.className === "string" &&
+						rowProps.className
+					) {
+						rowProps.className += ` shc-hidden-channel ${hiddenRowClass}`;
+					}
+
+					const icon = this.settings.hiddenChannelIcon;
+					if (hidden && (icon === "lock" || icon === "eye")) {
+						const indicator = Utilities.findInTree(
+							res,
+							(node) =>
+								node?.type === "div" &&
+								node.props?.onClick?.toString().includes("stopPropagation"),
+							rowTree,
+						);
+						if (indicator?.props?.children) {
+							indicator.props.children = [
+								React.createElement(HiddenChannelIcon, {
+									icon,
+									iconItem,
+									actionIcon,
+								}),
+							];
+						}
+					}
 
 					if (
-						!channel?.isGuildVocal?.() ||
-						this.isHiddenChannel(channel) ||
-						this.can(DiscordConstants.Permissions.CONNECT, channel)
+						!channel.isGuildVocal?.() ||
+						instance.connected ||
+						channel.id === Voice?.getChannelId?.() ||
+						(!hidden &&
+							this.can(DiscordConstants.Permissions.CONNECT, channel)) ||
+						typeof NavigationUtils?.transitionTo !== "function"
 					) {
 						return res;
 					}
@@ -2472,38 +2309,45 @@ const config = {
 					const channelLink = Utilities.findInTree(
 						res,
 						(node) =>
-							node?.props?.["data-list-item-id"] ===
-							`channels___${channel.id}`,
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
+							node?.props?.["data-list-item-id"] === `channels___${channel.id}`,
+						rowTree,
 					);
-
-					if (!channelLink?.props) {
-						this.warnLockedVoicePatchOnce(
-							"locked-voice-channel-link-not-found",
-							"Discord's locked voice channel row shape changed; locked voice channels cannot open SHC's channel information page.",
-							{ channelId: channel.id, result: res },
-						);
+					// Older hidden voice rows expose the link inside the marked wrapper.
+					const legacyRow =
+						!channelLink?.props &&
+						hidden &&
+						rowProps?.className?.includes?.(hiddenRowClass)
+							? rowProps
+							: undefined;
+					const linkProps =
+						channelLink?.props ??
+						legacyRow?.children?.[1]?.props?.children?.props;
+					if (!linkProps) {
+						if (!hidden) {
+							this.warnLockedVoicePatchOnce(
+								"locked-voice-channel-link-not-found",
+								"Discord’s locked voice channel row shape changed. Its information page is unavailable.",
+								{ channelId: channel.id, result: res },
+							);
+						}
 						return res;
 					}
 
-					channelLink.props.href = null;
-					channelLink.props.onMouseDown = (event) => {
-						event?.stopPropagation?.();
-					};
-					channelLink.props.onMouseUp = (event) => {
-						event?.stopPropagation?.();
-					};
-					channelLink.props.onClick = (event) => {
+					const stopMousePropagation = (event) => event?.stopPropagation?.();
+					if (legacyRow) {
+						legacyRow.onMouseDown = stopMousePropagation;
+						legacyRow.onMouseUp = stopMousePropagation;
+					}
+					linkProps.href = null;
+					linkProps.onMouseDown = stopMousePropagation;
+					linkProps.onMouseUp = stopMousePropagation;
+					linkProps.onClick = (event) => {
 						event?.preventDefault?.();
 						event?.stopPropagation?.();
 						NavigationUtils.transitionTo(
 							`/channels/${channel.guild_id}/${channel.id}`,
 						);
 					};
-
 					return res;
 				});
 			}
