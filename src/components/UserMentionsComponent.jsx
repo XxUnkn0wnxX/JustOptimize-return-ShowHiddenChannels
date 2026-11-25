@@ -13,7 +13,12 @@ const {
 	Components: { TextElement },
 } = getModules();
 
-export default function UserMentionsComponent({ channel, guild, settings }) {
+export default function UserMentionsComponent({
+	channel,
+	guild,
+	settings,
+	permission = DiscordConstants.Permissions.VIEW_CHANNEL,
+}) {
 	const [userMentionComponents, setUserMentionComponents] = React.useState([
 		"Loading...",
 	]);
@@ -45,17 +50,21 @@ export default function UserMentionsComponent({ channel, guild, settings }) {
 			}
 		}
 
-		const filteredUserOverwrites = Object.values(
-			channel.permissionOverwrites,
-		).filter((user) =>
-			Boolean(
+		const { CONNECT, VIEW_CHANNEL } = DiscordConstants.Permissions;
+		const filteredUserOverwrites = allUserOverwrites.filter((overwrite) => {
+			const user = UserStore.getUser(overwrite.id);
+			if (!user || !GuildMemberStore.isMember(guild.id, user.id)) return false;
+
+			return (
 				PermissionUtils.can({
-					permission: DiscordConstants.Permissions.VIEW_CHANNEL,
-					user: UserStore.getUser(user.id),
+					permission: VIEW_CHANNEL,
+					user,
 					context: channel,
-				}) && GuildMemberStore.isMember(guild.id, user.id),
-			),
-		);
+				}) &&
+				(permission !== CONNECT ||
+					PermissionUtils.can({ permission: CONNECT, user, context: channel }))
+			);
+		});
 
 		if (!filteredUserOverwrites?.length) {
 			return setUserMentionComponents(["None"]);
@@ -79,14 +88,22 @@ export default function UserMentionsComponent({ channel, guild, settings }) {
 
 	React.useEffect(() => {
 		fetchMemberAndMap();
-	}, [channel.id, guild.id, settings.showPerms, channel.permissionOverwrites]);
+	}, [
+		channel.id,
+		guild.id,
+		settings.showPerms,
+		channel.permissionOverwrites,
+		permission,
+	]);
 
 	return (
 		<TextElement
 			color={TextElement.Colors.STANDARD}
 			size={TextElement.Sizes.SIZE_14}
 		>
-			Users that can see this channel:
+			{permission === DiscordConstants.Permissions.CONNECT
+				? "Users with channel-specific permissions who can join:"
+				: "Users with channel-specific permissions who can view:"}
 			<div
 				style={{
 					marginTop: 8,

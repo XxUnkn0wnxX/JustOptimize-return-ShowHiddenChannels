@@ -1,31 +1,6 @@
 // @ts-check
 
 /**
- * @param {any} dispatcher
- * @returns {any[]}
- */
-export function getDispatcherNodes(dispatcher) {
-	const actionHandlers = dispatcher?._actionHandlers;
-	const nodes = actionHandlers?._nodes;
-
-	if (typeof nodes?.values === "function") {
-		try {
-			return Array.from(nodes.values());
-		} catch {
-			// Fall through to the legacy dependency graph.
-		}
-	}
-
-	const legacyNodes = actionHandlers?._dependencyGraph?.nodes;
-	if (Array.isArray(legacyNodes)) return legacyNodes;
-	if (legacyNodes && typeof legacyNodes === "object") {
-		return Object.values(legacyNodes);
-	}
-
-	return [];
-}
-
-/**
  * @param {any} store
  * @param {any} fallbackDispatcher
  * @returns {any}

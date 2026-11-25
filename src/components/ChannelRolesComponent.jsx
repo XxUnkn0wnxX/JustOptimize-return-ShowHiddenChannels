@@ -13,21 +13,27 @@ export default function ChannelRolesComponent({
 	guild,
 	settings,
 	roles,
+	permission = DiscordConstants.Permissions.VIEW_CHANNEL,
 }) {
+	const { CONNECT } = DiscordConstants.Permissions;
+	const permissionBits = BigInt(permission);
 	const channelRoles = Object.values(channel.permissionOverwrites).filter(
-		(role) =>
-			role !== undefined &&
-			role?.type === 0 &&
-			//* 1024n = VIEW_CHANNEL permission
-			//* 8n = ADMINISTRATOR permission
-			//* If role is ADMINISTRATOR it can view channel even if overwrites deny VIEW_CHANNEL
-			((settings.showAdmin &&
-				(roles[role.id].permissions & BigInt(8)) === BigInt(8)) ||
-				//* If overwrites allow VIEW_CHANNEL (it will override the default role permissions)
-				(role.allow & BigInt(1024)) === BigInt(1024) ||
-				//* If role can view channel by default and overwrites don't deny VIEW_CHANNEL
-				(roles[role.id].permissions & BigInt(1024) &&
-					(role.deny & BigInt(1024)) === BigInt(0))),
+		(overwrite) => {
+			if (overwrite?.type !== 0) return false;
+			const role = roles[overwrite.id];
+			if (!role) return false;
+
+			const showAdmin =
+				settings.showAdmin === "channel" ||
+				settings.showAdmin === "include" ||
+				(settings.showAdmin === "exclude" && !role.tags?.bot_id);
+			return (
+				(showAdmin && (role.permissions & 8n) === 8n) ||
+				(overwrite.allow & permissionBits) === permissionBits ||
+				((role.permissions & permissionBits) === permissionBits &&
+					(overwrite.deny & permissionBits) === 0n)
+			);
+		},
 	);
 
 	return (
@@ -38,7 +44,9 @@ export default function ChannelRolesComponent({
 				padding: 8,
 			}}
 		>
-			Channel-specific roles:
+			{permission === CONNECT
+				? "Channel-specific roles with Connect:"
+				: "Channel-specific roles:"}
 			<div
 				style={{
 					paddingTop: 8,

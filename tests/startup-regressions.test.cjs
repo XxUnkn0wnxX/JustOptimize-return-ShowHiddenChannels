@@ -197,7 +197,10 @@ function createEnvironment({
 	};
 }
 
-function loadPlugin(environment, { now = () => 0, timers = {} } = {}) {
+function loadPlugin(
+	environment,
+	{ now = () => 0, timers = {}, stubDoStart = true } = {},
+) {
 	const NativeDate = Date;
 	class TestDate extends NativeDate {
 		static now() {
@@ -210,12 +213,6 @@ function loadPlugin(environment, { now = () => 0, timers = {} } = {}) {
 			if (specifier === "./styles.css") return {};
 			if (specifier === "./utils/channelIcons")
 				return { installLockedChannelIcons() {} };
-			if (specifier === "./utils/dispatcher")
-				return {
-					getDispatcherNodes() {
-						return [];
-					},
-				};
 			if (specifier === "./utils/modules") return environment.moduleExports;
 			throw new Error(`Unexpected index.js dependency: ${specifier}`);
 		},
@@ -247,10 +244,12 @@ function loadPlugin(environment, { now = () => 0, timers = {} } = {}) {
 		},
 	});
 	const Plugin = pluginExports.default;
-	const plugin = new Plugin({ name: "ShowHiddenChannels" });
-	plugin.doStart = () => {
-		environment.didStart = true;
-	};
+	const plugin = new Plugin({ name: "ShowHiddenChannels", version: "test" });
+	if (stubDoStart) {
+		plugin.doStart = () => {
+			environment.didStart = true;
+		};
+	}
 	return plugin;
 }
 
@@ -482,4 +481,160 @@ test("startup proceeds when the container becomes ready", async () => {
 		),
 		false,
 	);
+});
+
+test("doStart installs the normal UI without calling an experiment hook", () => {
+	const environment = createEnvironment();
+	const plugin = loadPlugin(environment, { stubDoStart: false });
+	const events = [];
+	plugin.api.Data.load = () => "test";
+	environment.BdApi.DOM.addStyle = (name) => events.push(name);
+	plugin.Patch = () => events.push("patch");
+	plugin.rerenderChannels = () => events.push("rerender");
+	plugin.applyPrivateChannelHidingExperimentHotfix = () =>
+		assert.fail("Startup must not apply the retired override");
+
+	plugin.doStart();
+	assert.deepEqual(events, ["ShowHiddenChannels", "patch", "rerender"]);
+});
+
+const permissions = { VIEW_CHANNEL: 1024n, CONNECT: 1048576n };
+const TextElement = { Colors: {}, Sizes: {} };
+const React = {
+	createElement: (type, props, ...children) => ({
+		type,
+		props,
+		children: children.flat(Infinity),
+	}),
+	memo: (component) => component,
+};
+
+function renderNodes(node) {
+	return [node, ...(node?.children ?? []).flatMap(renderNodes)];
+}
+
+test("the information screen keeps available metadata and omits redacted fields", () => {
+	const guild = { id: "guild" };
+	const modules = {
+		DiscordConstants: { Permissions: permissions },
+		Components: { TextElement },
+		GuildStore: { getGuild: () => guild },
+		GuildRoleStore: { getRolesSnapshot: () => ({}) },
+		React,
+	};
+	const { Lockscreen } = compile(
+		path.join(sourceRoot, "src/components/Lockscreen.jsx"),
+		{
+			require: (name) => {
+				if (name === "../utils/modules") return { getModules: () => modules };
+				if (name === "../utils/date")
+					return {
+						getDateFromSnowflake: (id) => `date:${id}`,
+						convertToHMS: () => "five seconds",
+					};
+				return name;
+			},
+			globals: { BdApi: { React } },
+		},
+	);
+	const channel = {
+		id: "channel",
+		guild_id: guild.id,
+		type: 2,
+		topic: "Topic from channel record",
+		bitrate: 64000,
+		lastMessageId: "message",
+		rateLimitPerUser: 5,
+		isSpoilerChannel: () => true,
+		permissionOverwrites: {},
+	};
+	const settings = { showPerms: true, showAdmin: "channel" };
+	const redacted = renderNodes(
+		Lockscreen({ channel: { ...channel, isObfuscated: () => true }, settings }),
+	);
+	assert.ok(redacted.includes("date:channel"));
+	assert.ok(redacted.includes("five seconds"));
+	assert.ok(redacted.includes("Spoiler Channel 👁️"));
+	assert.ok(
+		!redacted.includes(channel.topic) && !redacted.includes("date:message"),
+	);
+	assert.ok(!redacted.includes(64));
+	assert.ok(!redacted.some((node) => node?.type === "./ForumComponent"));
+	assert.ok(!redacted.some((node) => node?.type === "./UserMentionsComponent"));
+	assert.ok(!redacted.some((node) => node?.type === "./ChannelRolesComponent"));
+	assert.equal(
+		redacted.find((node) => node?.type === "./AdminRolesComponent").props
+			.settings,
+		settings,
+	);
+
+	const ordinary = renderNodes(
+		Lockscreen({ channel, settings, isLockedVoiceChannel: true }),
+	);
+	assert.ok(
+		ordinary.includes(channel.topic) && ordinary.includes("date:message"),
+	);
+	assert.ok(ordinary.includes(64));
+	assert.equal(
+		ordinary.find((node) => node?.type === "./UserMentionsComponent").props
+			.permission,
+		permissions.CONNECT,
+	);
+	assert.equal(
+		ordinary.find((node) => node?.type === "./ChannelRolesComponent").props
+			.permission,
+		permissions.CONNECT,
+	);
+});
+
+test("locked voice member entries require visibility and connect permission", () => {
+	const [allowed, hidden, locked] = ["allowed", "hidden", "locked"];
+	const presented = [];
+	const users = new Map([allowed, hidden, locked].map((id) => [id, { id }]));
+	const modules = {
+		DiscordConstants: { Permissions: permissions },
+		Components: { TextElement },
+		React: {
+			...React,
+			useState: (initial) => [initial, () => {}],
+			useEffect: (effect) => effect(),
+		},
+		UserStore: {
+			getUser(id) {
+				assert.notEqual(id, "role");
+				return users.get(id);
+			},
+		},
+		ProfileActions: { fetchProfile: () => assert.fail("All users are cached") },
+		GuildMemberStore: { isMember: () => true },
+		PermissionUtils: {
+			can: ({ permission, user }) =>
+				permission === permissions.VIEW_CHANNEL
+					? user.id !== hidden
+					: user.id !== locked,
+		},
+		UserMentions: { react: ({ userId }) => presented.push(userId) },
+	};
+	const { default: UserMentionsComponent } = compile(
+		path.join(sourceRoot, "src/components/UserMentionsComponent.jsx"),
+		{
+			require: () => ({ getModules: () => modules }),
+			globals: { BdApi: { React } },
+		},
+	);
+	UserMentionsComponent({
+		channel: {
+			id: "voice",
+			permissionOverwrites: {
+				allowed: { id: allowed, type: 1 },
+				hidden: { id: hidden, type: 1 },
+				locked: { id: locked, type: 1 },
+				role: { id: "role", type: 0 },
+			},
+		},
+		guild: { id: "guild" },
+		settings: { showPerms: true },
+		permission: permissions.CONNECT,
+	});
+	assert.deepEqual(presented, [allowed]);
 });

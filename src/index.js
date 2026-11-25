@@ -2,7 +2,6 @@
 /** @typedef {import('./discord').SHCChannel} SHCChannel */
 import styles from "./styles.css";
 import { installLockedChannelIcons } from "./utils/channelIcons";
-import { getDispatcherNodes } from "./utils/dispatcher";
 
 const config = {
 	info: {
@@ -30,9 +29,6 @@ const config = {
 export default (() => {
 	// biome-ignore lint/security/noGlobalEval: This is a necessary evil
 	const RuntimeRequire = eval("require");
-	const PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID =
-		"2026-02-private-channel-hiding";
-	const PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT = -1;
 	const UPSTREAM_REPOSITORY = "JustOptimize/ShowHiddenChannels";
 	const ROLLING_RELEASE_TAG = "Nightly-Fork";
 	const isForkBuild = config.github_short !== UPSTREAM_REPOSITORY;
@@ -107,7 +103,6 @@ export default (() => {
 			this.api = new BdApi(meta.name);
 
 			this.hiddenChannelCache = {};
-			this.privateChannelHidingHotfixWarnings = new Set();
 			this.lockedVoicePatchWarnings = new Set();
 
 			this.collapsed = {};
@@ -380,7 +375,6 @@ export default (() => {
 				this.api.Data.save("version", config.info.version);
 			}
 
-			this.applyPrivateChannelHidingExperimentHotfix();
 			DOMTools.addStyle(config.info.name, styles);
 			this.Patch();
 			this.rerenderChannels();
@@ -399,132 +393,6 @@ export default (() => {
 			if (["browse", "customize", "guide"].includes(channel.id)) return false;
 
 			return !this.can(DiscordConstants.Permissions.VIEW_CHANNEL, channel);
-		}
-
-		/**
-		 * Temporary hotfix for Discord's 2026-02-private-channel-hiding experiment.
-		 * Keep this isolated so it can be removed once SHC has a better long-term path.
-		 */
-		applyPrivateChannelHidingExperimentHotfix() {
-			const { Logger } = require("./utils/modules");
-			const experimentStore = this.getPrivateChannelHidingExperimentStore();
-			const currentVariant = this.getPrivateChannelHidingVariant(experimentStore);
-
-			if (!experimentStore || typeof currentVariant !== "number") {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"experiment-not-found",
-					`Experiment ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
-				);
-				return;
-			}
-
-			if (currentVariant === PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT) {
-				Logger.info(
-					`Private channel hiding experiment already reads Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}); refreshing visible override.`,
-				);
-			}
-
-			const dispatcher = this.getDiscordDispatcher();
-			if (typeof dispatcher?.dispatch !== "function") {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"dispatcher-not-found",
-					"Discord dispatcher not found; private-channel-hiding hotfix was not applied.",
-				);
-				return;
-			}
-
-			const hasApexOverrideHandler = this.getDispatcherNodes().some(
-				(node) =>
-					node?.name === "ApexExperimentStore" &&
-					typeof node?.actionHandler?.APEX_EXPERIMENT_OVERRIDE_CREATE ===
-						"function",
-			);
-
-			if (!hasApexOverrideHandler) {
-				this.warnPrivateChannelHidingHotfixOnce(
-					"not-eligible-action-not-found",
-					`Not Eligible override action for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} not found; private-channel-hiding hotfix was not applied.`,
-				);
-				return;
-			}
-
-			dispatcher.dispatch({
-				type: "APEX_EXPERIMENT_OVERRIDE_CREATE",
-				experimentName: PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
-				variantId: PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT,
-			});
-			Logger.info(
-				`Private channel hiding experiment override dispatched as Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}).`,
-			);
-
-			window.setTimeout(() => {
-				const nextVariant =
-					this.getPrivateChannelHidingVariant(experimentStore);
-
-				if (
-					nextVariant !== PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT
-				) {
-					this.warnPrivateChannelHidingHotfixOnce(
-						"not-eligible-not-applied",
-						`Not Eligible option for ${PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID} did not apply; current variant is ${String(nextVariant)}.`,
-					);
-					return;
-				}
-
-				Logger.info(
-					`Private channel hiding experiment forced to Not Eligible (${PRIVATE_CHANNEL_HIDING_NOT_ELIGIBLE_VARIANT}). Restart Discord and delete Cache and Code Cache if channel names were already cached as No Access.`,
-				);
-			}, 500);
-		}
-
-		getPrivateChannelHidingExperimentStore() {
-			const Webpack = BdApi?.Webpack;
-			const candidates = [
-				Webpack?.getStore?.("ExperimentStore"),
-				Webpack?.getByKeys?.(
-					"getUserExperimentBucket",
-					"getUserExperimentDescriptor",
-				),
-				...this.getDispatcherNodes()
-					.filter((node) => node?.name === "ExperimentStore")
-					.map((node) => node?.store ?? node),
-			];
-
-			return candidates.find(
-				(candidate) =>
-					candidate && typeof candidate.getUserExperimentBucket === "function",
-			);
-		}
-
-		getPrivateChannelHidingVariant(experimentStore) {
-			try {
-				return experimentStore?.getUserExperimentBucket?.(
-					PRIVATE_CHANNEL_HIDING_EXPERIMENT_ID,
-				);
-			} catch {
-				return undefined;
-			}
-		}
-
-		getDiscordDispatcher() {
-			const Webpack = BdApi?.Webpack;
-			return (
-				Webpack?.getStore?.("UserStore")?._dispatcher ||
-				Webpack?.getByKeys?.("dispatch", "subscribe", "unsubscribe", {
-					searchExports: true,
-				})
-			);
-		}
-
-		getDispatcherNodes() {
-			return getDispatcherNodes(this.getDiscordDispatcher());
-		}
-
-		warnPrivateChannelHidingHotfixOnce(key, message) {
-			if (this.privateChannelHidingHotfixWarnings.has(key)) return;
-
-			this.privateChannelHidingHotfixWarnings.add(key);
-			require("./utils/modules").Logger.warn(message);
 		}
 
 		warnLockedVoicePatchOnce(key, message, details) {
@@ -874,104 +742,61 @@ export default (() => {
 				return res;
 			});
 
-			if (this.settings.hiddenChannelIcon) {
-				if (!ChannelItemRenderer) {
-					this.api.UI.showToast(
-						"(SHC) ChannelItemRenderer module is missing, channel lock icon won't be shown.",
-						{
-							type: "warning",
-						},
-					);
-				}
-
+			// Keep voice navigation independent of the optional hidden-channel indicator.
+			if (typeof ChannelItemRenderer?.render !== "function") {
+				this.api.UI.showToast(
+					"(SHC) ChannelItemRenderer module is missing. Channel indicators and voice information links are unavailable.",
+					{ type: "warning" },
+				);
+			} else {
+				const rowTree = {
+					walkable: ["props", "children", "child", "sibling"],
+					maxRecursion: 100,
+				};
 				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
 					const [instance] =
-						/** @type {[{channel: SHCChannel, connected: boolean}]} */ (args);
-					if (!this.isHiddenChannel(instance?.channel)) {
-						return res;
-					}
-
-					const item = res?.props?.children?.props;
-					if (item?.className) {
-						item.className += ` shc-hidden-channel shc-hidden-channel-type-${instance.channel.type}`;
-					}
-
-					const children = Utilities.findInTree(
-						res,
-						(m) =>
-							m?.props?.onClick?.toString().includes("stopPropagation") &&
-							m.type === "div",
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (children.props?.children) {
-						children.props.children = [
-							React.createElement(HiddenChannelIcon, {
-								icon: this.settings.hiddenChannelIcon,
-								iconItem: iconItem,
-								actionIcon: actionIcon,
-							}),
-						];
-					}
-
-					const isInCallInThisChannel =
-						instance.channel.type ===
-							DiscordConstants.ChannelTypes.GUILD_VOICE && !instance.connected;
-					if (!isInCallInThisChannel) {
-						return res;
-					}
-
-					const wrapper = Utilities.findInTree(
-						res,
-						(channel) =>
-							channel?.props?.className?.includes("shc-hidden-channel-type-2"),
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
-					);
-
-					if (!wrapper) {
-						return res;
-					}
-
-					wrapper.props.onMouseDown = () => {};
-					wrapper.props.onMouseUp = () => {};
-
-					const mainContent = wrapper?.props?.children[1]?.props?.children;
-
-					if (!mainContent) {
-						return res;
-					}
-
-					mainContent.props.onClick = () => {
-						if (instance.channel?.isGuildVocal()) {
-							NavigationUtils.transitionTo(
-								`/channels/${instance.channel.guild_id}/${instance.channel.id}`,
-							);
-						}
-					};
-					mainContent.props.href = null;
-
-					return res;
-				});
-			}
-
-			//* Open SHC's channel information page for visible voice channels
-			//* that Discord shows but the current user cannot connect to.
-			if (ChannelItemRenderer) {
-				Patcher.after(ChannelItemRenderer, "render", (_, args, res) => {
-					const [instance] =
-						/** @type {[{channel: SHCChannel}]} */ (args);
+						/** @type {[{channel: SHCChannel, connected?: boolean}]} */ (args);
 					const channel = instance?.channel;
+					if (!res || !channel) return res;
+
+					const hidden = this.isHiddenChannel(channel);
+					const rowProps = res?.props?.children?.props;
+					const hiddenRowClass = `shc-hidden-channel-type-${channel.type}`;
+					if (
+						hidden &&
+						typeof rowProps?.className === "string" &&
+						rowProps.className
+					) {
+						rowProps.className += ` shc-hidden-channel ${hiddenRowClass}`;
+					}
+
+					const icon = this.settings.hiddenChannelIcon;
+					if (hidden && (icon === "lock" || icon === "eye")) {
+						const indicator = Utilities.findInTree(
+							res,
+							(node) =>
+								node?.type === "div" &&
+								node.props?.onClick?.toString().includes("stopPropagation"),
+							rowTree,
+						);
+						if (indicator?.props?.children) {
+							indicator.props.children = [
+								React.createElement(HiddenChannelIcon, {
+									icon,
+									iconItem,
+									actionIcon,
+								}),
+							];
+						}
+					}
 
 					if (
-						!channel?.isGuildVocal?.() ||
-						this.isHiddenChannel(channel) ||
-						this.can(DiscordConstants.Permissions.CONNECT, channel)
+						!channel.isGuildVocal?.() ||
+						instance.connected ||
+						channel.id === Voice?.getChannelId?.() ||
+						(!hidden &&
+							this.can(DiscordConstants.Permissions.CONNECT, channel)) ||
+						typeof NavigationUtils?.transitionTo !== "function"
 					) {
 						return res;
 					}
@@ -979,38 +804,45 @@ export default (() => {
 					const channelLink = Utilities.findInTree(
 						res,
 						(node) =>
-							node?.props?.["data-list-item-id"] ===
-							`channels___${channel.id}`,
-						{
-							walkable: ["props", "children", "child", "sibling"],
-							maxRecursion: 100,
-						},
+							node?.props?.["data-list-item-id"] === `channels___${channel.id}`,
+						rowTree,
 					);
-
-					if (!channelLink?.props) {
-						this.warnLockedVoicePatchOnce(
-							"locked-voice-channel-link-not-found",
-							"Discord's locked voice channel row shape changed; locked voice channels cannot open SHC's channel information page.",
-							{ channelId: channel.id, result: res },
-						);
+					// Older hidden voice rows expose the link inside the marked wrapper.
+					const legacyRow =
+						!channelLink?.props &&
+						hidden &&
+						rowProps?.className?.includes?.(hiddenRowClass)
+							? rowProps
+							: undefined;
+					const linkProps =
+						channelLink?.props ??
+						legacyRow?.children?.[1]?.props?.children?.props;
+					if (!linkProps) {
+						if (!hidden) {
+							this.warnLockedVoicePatchOnce(
+								"locked-voice-channel-link-not-found",
+								"Discord’s locked voice channel row shape changed. Its information page is unavailable.",
+								{ channelId: channel.id, result: res },
+							);
+						}
 						return res;
 					}
 
-					channelLink.props.href = null;
-					channelLink.props.onMouseDown = (event) => {
-						event?.stopPropagation?.();
-					};
-					channelLink.props.onMouseUp = (event) => {
-						event?.stopPropagation?.();
-					};
-					channelLink.props.onClick = (event) => {
+					const stopMousePropagation = (event) => event?.stopPropagation?.();
+					if (legacyRow) {
+						legacyRow.onMouseDown = stopMousePropagation;
+						legacyRow.onMouseUp = stopMousePropagation;
+					}
+					linkProps.href = null;
+					linkProps.onMouseDown = stopMousePropagation;
+					linkProps.onMouseUp = stopMousePropagation;
+					linkProps.onClick = (event) => {
 						event?.preventDefault?.();
 						event?.stopPropagation?.();
 						NavigationUtils.transitionTo(
 							`/channels/${channel.guild_id}/${channel.id}`,
 						);
 					};
-
 					return res;
 				});
 			}
